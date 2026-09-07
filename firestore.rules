@@ -1,0 +1,259 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------
+    // Hardened Security Primitives & Helpers
+    // -------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Role-based Access Control Helpers
+    function getUserRole() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : 'GUEST';
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        getUserRole() == 'SUPER_ADMIN' ||
+        (request.auth.token.email != null && request.auth.token.email == 'aigerminipro@gmail.com')
+      );
+    }
+
+    function isContentAdmin() {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        getUserRole() == 'CONTENT_ADMIN'
+      );
+    }
+
+    function isUnitAdmin() {
+      return isSignedIn() && (
+        isContentAdmin() ||
+        getUserRole() == 'UNIT_ADMIN'
+      );
+    }
+
+    // -------------------------------------------------------------
+    // Validation Helpers
+    // -------------------------------------------------------------
+    function isValidCourse(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+        data.status in ['DRAFT', 'REVIEW', 'PUBLISHED', 'ARCHIVED'] &&
+        data.version is number && data.version >= 1 &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidLesson(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.courseId is string && isValidId(data.courseId) &&
+        data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+        data.status in ['DRAFT', 'REVIEW', 'PUBLISHED', 'ARCHIVED'] &&
+        data.version is number && data.version >= 1 &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidSlide(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.lessonId is string && isValidId(data.lessonId) &&
+        data.order is number && data.order >= 1 &&
+        data.imageUrl is string && data.imageUrl.size() <= 1000 &&
+        data.version is number && data.version >= 1 &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidContentSection(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.lessonId is string && isValidId(data.lessonId) &&
+        data.order is number && data.order >= 1 &&
+        data.title is string && data.title.size() <= 300 &&
+        data.bodyHtml is string && data.bodyHtml.size() <= 50000 &&
+        data.version is number && data.version >= 1 &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidVideo(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.lessonId is string && isValidId(data.lessonId) &&
+        data.title is string && data.title.size() <= 300 &&
+        data.videoUrl is string && data.videoUrl.size() <= 1000 &&
+        data.version is number && data.version >= 1 &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidAudio(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.lessonId is string && isValidId(data.lessonId) &&
+        data.title is string && data.title.size() <= 300 &&
+        data.audioUrl is string && data.audioUrl.size() <= 1000 &&
+        data.version is number && data.version >= 1 &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidUnit(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.name is string && data.name.size() <= 200 &&
+        data.code is string && data.code.size() <= 32 &&
+        data.type in ['BRIGADE', 'BATTALION', 'SHIP', 'DEPARTMENT', 'ISLAND'] &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidUser(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.name is string && data.name.size() <= 150 &&
+        data.email is string && data.email.size() <= 200 &&
+        data.role in ['SUPER_ADMIN', 'CONTENT_ADMIN', 'UNIT_ADMIN', 'USER'] &&
+        data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidUserProgress(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.userId is string && isValidId(data.userId) &&
+        data.lessonId is string && isValidId(data.lessonId) &&
+        data.overallProgress is number && data.overallProgress >= 0 && data.overallProgress <= 100 &&
+        data.completed is bool &&
+        data.lastAccessedAt is string;
+    }
+
+    function isValidNotification(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.title is string && data.title.size() <= 300 &&
+        data.content is string && data.content.size() <= 5000 &&
+        data.type in ['DIRECTIVE', 'ANNOUNCEMENT', 'STUDY_REMINDER', 'SYSTEM'] &&
+        data.priority in ['HIGH', 'NORMAL', 'URGENT'] &&
+        data.createdAt is string;
+    }
+
+    function isValidStorageFile(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.category in ['courses', 'lessons', 'slides', 'videos', 'audios', 'documents', 'thumbnails'] &&
+        data.entityId is string && isValidId(data.entityId) &&
+        data.storagePath is string && data.storagePath.size() <= 500 &&
+        data.downloadUrl is string && data.downloadUrl.size() <= 1000 &&
+        data.version is number && data.version >= 1 &&
+        data.createdAt is string;
+    }
+
+    // -------------------------------------------------------------
+    // Collections Access Rules
+    // -------------------------------------------------------------
+
+    // Courses Collection
+    match /courses/{courseId} {
+      allow get, list: if true;
+      allow create: if isContentAdmin() && isValidId(courseId) && isValidCourse(incoming()) && incoming().id == courseId;
+      allow update: if isContentAdmin() && isValidId(courseId) && isValidCourse(incoming()) && incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(courseId);
+    }
+
+    // Lessons Collection
+    match /lessons/{lessonId} {
+      allow get, list: if true;
+      allow create: if isContentAdmin() && isValidId(lessonId) && isValidLesson(incoming()) && incoming().id == lessonId;
+      allow update: if isContentAdmin() && isValidId(lessonId) && isValidLesson(incoming()) && incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(lessonId);
+    }
+
+    // Slides Collection
+    match /slides/{slideId} {
+      allow get, list: if true;
+      allow create: if isContentAdmin() && isValidId(slideId) && isValidSlide(incoming()) && incoming().id == slideId;
+      allow update: if isContentAdmin() && isValidId(slideId) && isValidSlide(incoming()) && incoming().id == existing().id;
+      allow delete: if isContentAdmin() && isValidId(slideId);
+    }
+
+    // Contents Collection
+    match /contents/{contentId} {
+      allow get, list: if true;
+      allow create: if isContentAdmin() && isValidId(contentId) && isValidContentSection(incoming()) && incoming().id == contentId;
+      allow update: if isContentAdmin() && isValidId(contentId) && isValidContentSection(incoming()) && incoming().id == existing().id;
+      allow delete: if isContentAdmin() && isValidId(contentId);
+    }
+
+    // Videos Collection
+    match /videos/{videoId} {
+      allow get, list: if true;
+      allow create: if isContentAdmin() && isValidId(videoId) && isValidVideo(incoming()) && incoming().id == videoId;
+      allow update: if isContentAdmin() && isValidId(videoId) && isValidVideo(incoming()) && incoming().id == existing().id;
+      allow delete: if isContentAdmin() && isValidId(videoId);
+    }
+
+    // Audios Collection
+    match /audios/{audioId} {
+      allow get, list: if true;
+      allow create: if isContentAdmin() && isValidId(audioId) && isValidAudio(incoming()) && incoming().id == audioId;
+      allow update: if isContentAdmin() && isValidId(audioId) && isValidAudio(incoming()) && incoming().id == existing().id;
+      allow delete: if isContentAdmin() && isValidId(audioId);
+    }
+
+    // Units Collection
+    match /units/{unitId} {
+      allow get, list: if true;
+      allow create: if isSuperAdmin() && isValidId(unitId) && isValidUnit(incoming()) && incoming().id == unitId;
+      allow update: if isSuperAdmin() && isValidId(unitId) && isValidUnit(incoming()) && incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(unitId);
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSuperAdmin() && isValidId(userId) && isValidUser(incoming()) && incoming().id == userId;
+      allow update: if (isSuperAdmin() || (isSignedIn() && request.auth.uid == userId)) &&
+                       isValidId(userId) && isValidUser(incoming()) && incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(userId);
+    }
+
+    // User Progress Collection
+    match /progress/{progressId} {
+      allow get, list: if isSignedIn() && (
+        isUnitAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn() && isValidId(progressId) && isValidUserProgress(incoming()) &&
+                       (incoming().userId == request.auth.uid || isUnitAdmin()) &&
+                       incoming().id == progressId;
+      allow update: if isSignedIn() && isValidId(progressId) && isValidUserProgress(incoming()) &&
+                       (existing().userId == request.auth.uid || isUnitAdmin()) &&
+                       incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(progressId);
+    }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      allow get, list: if true;
+      allow create: if isUnitAdmin() && isValidId(notificationId) && isValidNotification(incoming()) && incoming().id == notificationId;
+      allow update: if isUnitAdmin() && isValidId(notificationId) && isValidNotification(incoming()) && incoming().id == existing().id;
+      allow delete: if isUnitAdmin() && isValidId(notificationId);
+    }
+
+    // Storage File Metadata Collection
+    match /storageFiles/{fileId} {
+      allow get, list: if true;
+      allow create: if isContentAdmin() && isValidId(fileId) && isValidStorageFile(incoming()) && incoming().id == fileId;
+      allow update: if isContentAdmin() && isValidId(fileId) && isValidStorageFile(incoming()) && incoming().id == existing().id;
+      allow delete: if isSuperAdmin() && isValidId(fileId);
+    }
+  }
+}

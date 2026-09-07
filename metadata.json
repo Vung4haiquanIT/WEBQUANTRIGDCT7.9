@@ -1,0 +1,6 @@
+{
+  "name": "Giáo Dục Chính Trị Vùng 4 Hải Quân - Web Admin",
+  "description": "Hệ thống quản trị nội dung giáo dục chính trị trung tâm Vùng 4 Hải Quân: Chuyên đề, Bài học (Slide, Nội dung, Video, Audio), Tiến độ học tập và Đồng bộ Realtime.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,740 @@
+{
+  "entities": {
+    "Course": {
+      "title": "Course",
+      "description": "Chuyên đề Giáo dục chính trị Quân sự Vùng 4 Hải Quân",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã định danh chuyên đề",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Tiêu đề chuyên đề",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "description": "Tóm tắt chuyên đề",
+          "maxLength": 2000
+        },
+        "thumbnail": {
+          "type": "string",
+          "description": "URL hình ảnh đại diện",
+          "maxLength": 1000
+        },
+        "storageThumbnailPath": {
+          "type": "string",
+          "description": "Đường dẫn Cloud Storage thumbnail",
+          "maxLength": 500
+        },
+        "year": {
+          "type": "number",
+          "description": "Năm huấn luyện giáo dục chính trị"
+        },
+        "order": {
+          "type": "number",
+          "description": "Thứ tự sắp xếp chuyên đề"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["DRAFT", "REVIEW", "PUBLISHED", "ARCHIVED"],
+          "description": "Trạng thái phát hành"
+        },
+        "version": {
+          "type": "number",
+          "description": "Phiên bản chuyên đề (tự động tăng khi cập nhật)"
+        },
+        "isDeleted": {
+          "type": "boolean",
+          "description": "Đánh dấu xóa mềm"
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Cơ quan/Cán bộ biên soạn"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian khởi tạo"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật gần nhất"
+        }
+      },
+      "required": ["id", "title", "status", "version", "createdAt", "updatedAt"]
+    },
+    "Lesson": {
+      "title": "Lesson",
+      "description": "Bài học giáo dục chính trị trực thuộc chuyên đề",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã bài học",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "courseId": {
+          "type": "string",
+          "description": "Mã chuyên đề cha",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Tiêu đề bài học",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "description": "Mô tả nội dung bài học",
+          "maxLength": 2000
+        },
+        "thumbnail": {
+          "type": "string",
+          "description": "URL ảnh đại diện bài học",
+          "maxLength": 1000
+        },
+        "storageThumbnailPath": {
+          "type": "string",
+          "description": "Đường dẫn Cloud Storage thumbnail bài học",
+          "maxLength": 500
+        },
+        "rawPptUrl": {
+          "type": "string",
+          "description": "URL tải về tệp PPT/PPTX gốc lưu trữ",
+          "maxLength": 1000
+        },
+        "rawPptStoragePath": {
+          "type": "string",
+          "description": "Đường dẫn Cloud Storage tệp PPT gốc",
+          "maxLength": 500
+        },
+        "order": {
+          "type": "number",
+          "description": "Thứ tự bài học trong chuyên đề"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["DRAFT", "REVIEW", "PUBLISHED", "ARCHIVED"],
+          "description": "Trạng thái phát hành"
+        },
+        "version": {
+          "type": "number",
+          "description": "Phiên bản bài học (tăng khi sửa đổi slide, nội dung hoặc media)"
+        },
+        "isDeleted": {
+          "type": "boolean",
+          "description": "Đánh dấu xóa mềm"
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "Thời lượng học tập dự kiến (phút)"
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Cán bộ biên soạn bài học"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời điểm tạo"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời điểm cập nhật"
+        }
+      },
+      "required": ["id", "courseId", "title", "status", "version", "createdAt", "updatedAt"]
+    },
+    "Slide": {
+      "title": "Slide",
+      "description": "Metadata Slide bài giảng đã được render thành ảnh chuẩn 16:9 lưu trữ trên Cloud Storage",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã slide",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "lessonId": {
+          "type": "string",
+          "description": "Mã bài học liên kết",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "order": {
+          "type": "number",
+          "description": "Thứ tự slide trong bài"
+        },
+        "title": {
+          "type": "string",
+          "description": "Tiêu đề hoặc nhãn slide",
+          "maxLength": 200
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Đường dẫn tải/truy xuất ảnh slide chất lượng cao",
+          "maxLength": 1000
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Vị trí Cloud Storage: slides/{lessonId}/slide_v{version}_{order}.jpg",
+          "maxLength": 500
+        },
+        "notes": {
+          "type": "string",
+          "description": "Ghi chú giảng dạy cho cán bộ",
+          "maxLength": 2000
+        },
+        "width": {
+          "type": "number",
+          "description": "Chiều rộng ảnh (pixel)"
+        },
+        "height": {
+          "type": "number",
+          "description": "Chiều cao ảnh (pixel)"
+        },
+        "version": {
+          "type": "number",
+          "description": "Phiên bản slide"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật"
+        }
+      },
+      "required": ["id", "lessonId", "order", "imageUrl", "version", "createdAt", "updatedAt"]
+    },
+    "ContentSection": {
+      "title": "ContentSection",
+      "description": "Phần nội dung văn bản bài giảng GDCT",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã mục nội dung",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "lessonId": {
+          "type": "string",
+          "description": "Mã bài học",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "order": {
+          "type": "number",
+          "description": "Thứ tự mục nội dung"
+        },
+        "title": {
+          "type": "string",
+          "description": "Tiêu đề mục",
+          "maxLength": 300
+        },
+        "bodyHtml": {
+          "type": "string",
+          "description": "Nội dung chi tiết định dạng HTML",
+          "maxLength": 50000
+        },
+        "quote": {
+          "type": "string",
+          "description": "Trích dẫn hoặc lời dặn của Bác Hồ/Nghị quyết",
+          "maxLength": 1000
+        },
+        "version": {
+          "type": "number",
+          "description": "Phiên bản nội dung"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật"
+        }
+      },
+      "required": ["id", "lessonId", "order", "title", "bodyHtml", "version", "createdAt", "updatedAt"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Metadata Video tư liệu bài giảng GDCT",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã video",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "lessonId": {
+          "type": "string",
+          "description": "Mã bài học",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Tên phim/video tư liệu",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "description": "Mô tả nội dung video",
+          "maxLength": 2000
+        },
+        "thumbnail": {
+          "type": "string",
+          "description": "URL thumbnail video",
+          "maxLength": 1000
+        },
+        "videoUrl": {
+          "type": "string",
+          "description": "URL phát video",
+          "maxLength": 1000
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Vị trí Cloud Storage: videos/{lessonId}/video_v{version}_{id}.mp4",
+          "maxLength": 500
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Thời lượng video (giây)"
+        },
+        "fileSizeMb": {
+          "type": "number",
+          "description": "Dung lượng tệp (MB)"
+        },
+        "order": {
+          "type": "number",
+          "description": "Thứ tự sắp xếp video"
+        },
+        "version": {
+          "type": "number",
+          "description": "Phiên bản video"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật"
+        }
+      },
+      "required": ["id", "lessonId", "title", "videoUrl", "version", "createdAt", "updatedAt"]
+    },
+    "Audio": {
+      "title": "Audio",
+      "description": "Metadata Audio bài giảng GDCT",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã audio",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "lessonId": {
+          "type": "string",
+          "description": "Mã bài học",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "description": "Tên bài phát thanh / ghi âm bài giảng",
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "description": "Mô tả audio",
+          "maxLength": 2000
+        },
+        "audioUrl": {
+          "type": "string",
+          "description": "URL phát âm thanh",
+          "maxLength": 1000
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Vị trí Cloud Storage: audios/{lessonId}/audio_v{version}_{id}.mp3",
+          "maxLength": 500
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Thời lượng audio (giây)"
+        },
+        "fileSizeMb": {
+          "type": "number",
+          "description": "Dung lượng tệp (MB)"
+        },
+        "order": {
+          "type": "number",
+          "description": "Thứ tự sắp xếp audio"
+        },
+        "version": {
+          "type": "number",
+          "description": "Phiên bản audio"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian tạo"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Thời gian cập nhật"
+        }
+      },
+      "required": ["id", "lessonId", "title", "audioUrl", "version", "createdAt", "updatedAt"]
+    },
+    "Unit": {
+      "title": "Unit",
+      "description": "Đơn vị Lữ đoàn, Tiểu đoàn, Tàu, Điểm đảo thuộc Vùng 4 Hải Quân",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "type": {
+          "type": "string",
+          "enum": ["BRIGADE", "BATTALION", "SHIP", "DEPARTMENT", "ISLAND"]
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "memberCount": {
+          "type": "number"
+        },
+        "commander": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "politicalOfficer": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "order": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INACTIVE"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "code", "type", "createdAt", "updatedAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Tài khoản cán bộ, chiến sĩ và phân quyền quân sự",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 200
+        },
+        "role": {
+          "type": "string",
+          "enum": ["SUPER_ADMIN", "CONTENT_ADMIN", "UNIT_ADMIN", "USER"]
+        },
+        "rank": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "position": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "unitId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "unitName": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INACTIVE"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "email", "role", "createdAt", "updatedAt"]
+    },
+    "UserProgress": {
+      "title": "UserProgress",
+      "description": "Tiến độ học tập của chiến sĩ (đồng bộ offline/online)",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "userName": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "unitId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "unitName": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "lessonId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "lessonTitle": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "courseId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "slideProgress": {
+          "type": "number"
+        },
+        "videoProgress": {
+          "type": "number"
+        },
+        "audioProgress": {
+          "type": "number"
+        },
+        "contentProgress": {
+          "type": "number"
+        },
+        "overallProgress": {
+          "type": "number"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "lastAccessedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "number"
+        }
+      },
+      "required": ["id", "userId", "lessonId", "overallProgress", "completed", "lastAccessedAt"]
+    },
+    "SystemNotification": {
+      "title": "SystemNotification",
+      "description": "Chỉ thị & Thông báo giáo dục chính trị",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 5000
+        },
+        "type": {
+          "type": "string",
+          "enum": ["DIRECTIVE", "ANNOUNCEMENT", "STUDY_REMINDER", "SYSTEM"]
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["HIGH", "NORMAL", "URGENT"]
+        },
+        "targetUnitId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "sentBy": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "content", "type", "priority", "createdAt"]
+    },
+    "StorageFileMetadata": {
+      "title": "StorageFileMetadata",
+      "description": "Quản lý phiên bản tệp đa phương tiện trên Cloud Storage",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "category": {
+          "type": "string",
+          "enum": ["courses", "lessons", "slides", "videos", "audios", "documents", "thumbnails"]
+        },
+        "entityId": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "storagePath": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "downloadUrl": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "version": {
+          "type": "number"
+        },
+        "originalName": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "sizeBytes": {
+          "type": "number"
+        },
+        "mimeType": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "isDeleted": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "category", "entityId", "storagePath", "downloadUrl", "version", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/courses/{courseId}": {
+      "schema": "Course",
+      "description": "Tập hợp các chuyên đề Giáo dục chính trị"
+    },
+    "/lessons/{lessonId}": {
+      "schema": "Lesson",
+      "description": "Tập hợp các bài học thuộc chuyên đề"
+    },
+    "/slides/{slideId}": {
+      "schema": "Slide",
+      "description": "Metadata Slide bài giảng rendered trên Cloud Storage"
+    },
+    "/contents/{contentId}": {
+      "schema": "ContentSection",
+      "description": "Nội dung chi tiết bài học GDCT"
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Metadata Video tư liệu trên Cloud Storage"
+    },
+    "/audios/{audioId}": {
+      "schema": "Audio",
+      "description": "Metadata Audio bài giảng trên Cloud Storage"
+    },
+    "/units/{unitId}": {
+      "schema": "Unit",
+      "description": "Danh mục các đơn vị Lữ đoàn, Đảo, Tàu chiến thuộc Vùng 4"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Hồ sơ người dùng & phân quyền quân sự"
+    },
+    "/progress/{progressId}": {
+      "schema": "UserProgress",
+      "description": "Tiến độ học tập của cán bộ, chiến sĩ"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "SystemNotification",
+      "description": "Thông báo & Chỉ thị giáo dục chính trị"
+    },
+    "/storageFiles/{fileId}": {
+      "schema": "StorageFileMetadata",
+      "description": "Quản lý phiên bản lưu trữ Cloud Storage"
+    }
+  }
+}
