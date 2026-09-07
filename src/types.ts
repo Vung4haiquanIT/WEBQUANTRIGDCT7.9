@@ -404,7 +404,8 @@ export type StorageCategory =
   | 'videos' 
   | 'audios' 
   | 'documents' 
-  | 'thumbnails';
+  | 'thumbnails'
+  | 'banners';
 
 export type StorageProviderType = 'cloudinary' | 'firebase';
 
@@ -734,6 +735,26 @@ export interface AndroidOfflinePackageRecord {
   offlinePackage?: OfflinePackage;
   stagingPackage?: OfflinePackage; // Safe staging for atomic version updates
   errorMessage?: string;
+}
+
+// -------------------------------------------------------------
+// Mobile App Home Horizontal Poster / Banner (Max 5 items)
+// -------------------------------------------------------------
+export interface AppBanner {
+  id: string;
+  title: string;
+  subtitle?: string;
+  imageUrl?: string;
+  cloudinaryPublicId?: string;
+  targetLessonId?: string;
+  targetCourseId?: string;
+  targetUrl?: string;
+  badgeText?: string;
+  backgroundColor?: string;
+  order: number; // 1 to 5
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 

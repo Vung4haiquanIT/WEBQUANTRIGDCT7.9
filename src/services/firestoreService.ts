@@ -38,7 +38,8 @@ import {
   LessonQuestion,
   SourceDocument,
   UserItemProgress,
-  UserSectionProgress
+  UserSectionProgress,
+  AppBanner
 } from '../types';
 
 // =============================================================
@@ -1327,7 +1328,7 @@ export const firestoreService = {
   getUnits: async (): Promise<Unit[]> => {
     const colRef = collection(db, 'units');
     const snap = await getDocs(colRef);
-    return snap.docs.map(d => d.data() as Unit);
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as Unit));
   },
 
   // -------------------------------------------------------------
@@ -1336,7 +1337,7 @@ export const firestoreService = {
   getUsers: async (): Promise<User[]> => {
     const colRef = collection(db, 'users');
     const snap = await getDocs(colRef);
-    return snap.docs.map(d => d.data() as User);
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as User));
   },
 
   // -------------------------------------------------------------
@@ -1355,7 +1356,7 @@ export const firestoreService = {
       q = query(colRef, limit(100));
     }
     const snap = await getDocs(q);
-    return snap.docs.map(d => d.data() as UserProgress);
+    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as UserProgress));
   },
 
   submitProgress: async (data: Partial<UserProgress>): Promise<UserProgress> => {
@@ -1419,6 +1420,153 @@ export const firestoreService = {
     };
     await setDoc(docRef, notif);
     return notif;
+  },
+
+  // -------------------------------------------------------------
+  // POSTER & BANNER (App Mobile Home Carousel - Max 5)
+  // -------------------------------------------------------------
+  getBanners: async (): Promise<AppBanner[]> => {
+    const colRef = collection(db, 'banners');
+    const q = query(colRef, orderBy('order', 'asc'));
+    const snap = await getDocs(q);
+    const banners = snap.docs.map(d => d.data() as AppBanner);
+    
+    // Only seed once on initial fresh install, not when user deliberately empties banners
+    if (banners.length === 0) {
+      const initDocRef = doc(db, 'system_settings', 'banners_init');
+      const initSnap = await getDoc(initDocRef);
+      if (!initSnap.exists()) {
+        await setDoc(initDocRef, { initialized: true, initializedAt: new Date().toISOString() });
+        return await firestoreService.seedDefaultBanners();
+      }
+    }
+    return banners;
+  },
+
+  seedDefaultBanners: async (): Promise<AppBanner[]> => {
+    const now = new Date().toISOString();
+    const defaultBanners: AppBanner[] = [
+      {
+        id: 'banner-hoc-tap-ren-luyen',
+        title: 'HỌC TẬP, RÈN LUYỆN VÌ LÝ TƯỞNG CỘNG SẢN',
+        subtitle: 'Kiên định mục tiêu độc lập dân tộc và chủ nghĩa xã hội',
+        badgeText: 'CHÍNH TRỊ QUÂN SỰ',
+        backgroundColor: 'linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%)',
+        order: 1,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: 'banner-chu-quyen-bien-dao',
+        title: 'BẢO VỆ VỮNG CHẮC CHỦ QUYỀN BIỂN ĐẢO TỔ QUỐC',
+        subtitle: 'Cán bộ, chiến sĩ Vùng 4 Hải quân quyết tâm hoàn thành xuất sắc mọi nhiệm vụ',
+        badgeText: 'HẢI QUÂN VIỆT NAM',
+        backgroundColor: 'linear-gradient(135deg, #0369a1 0%, #0c4a6e 100%)',
+        order: 2,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      },
+      {
+        id: 'banner-quan-doi-chinh-quy',
+        title: 'XÂY DỰNG QUÂN ĐỘI CÁCH MẠNG, CHÍNH QUY, TINH NHUỆ',
+        subtitle: 'Tuyệt đối trung thành với Đảng, với Tổ quốc và nhân dân',
+        badgeText: 'TRUNG VỚI ĐẢNG',
+        backgroundColor: 'linear-gradient(135deg, #991b1b 0%, #450a0a 100%)',
+        order: 3,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now
+      }
+    ];
+
+    for (const b of defaultBanners) {
+      const docRef = doc(db, 'banners', b.id);
+      await setDoc(docRef, b);
+    }
+    return defaultBanners;
+  },
+
+  createBanner: async (data: Partial<AppBanner>): Promise<AppBanner> => {
+    // Max 5 banners constraint
+    const existing = await firestoreService.getBanners();
+    if (existing.length >= 5) {
+      throw new Error('Hệ thống đã có tối đa 5 poster/banner. Vui lòng chỉnh sửa hoặc xóa bớt banner cũ trước khi tạo mới.');
+    }
+
+    const id = data.id || `banner-${Date.now()}`;
+    const docRef = doc(db, 'banners', id);
+    const now = new Date().toISOString();
+    const nextOrder = data.order || (existing.length + 1);
+
+    const banner: AppBanner = {
+      id,
+      title: data.title || '',
+      subtitle: data.subtitle || '',
+      imageUrl: data.imageUrl || '',
+      cloudinaryPublicId: data.cloudinaryPublicId || '',
+      targetLessonId: data.targetLessonId || '',
+      targetCourseId: data.targetCourseId || '',
+      targetUrl: data.targetUrl || '',
+      badgeText: data.badgeText || '',
+      backgroundColor: data.backgroundColor || 'linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%)',
+      order: nextOrder,
+      isActive: data.isActive ?? true,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    await setDoc(docRef, banner);
+    return banner;
+  },
+
+  updateBanner: async (id: string, updates: Partial<AppBanner>): Promise<AppBanner> => {
+    const docRef = doc(db, 'banners', id);
+    const now = new Date().toISOString();
+    const payload = {
+      ...updates,
+      updatedAt: now
+    };
+    await updateDoc(docRef, payload);
+    const snap = await getDoc(docRef);
+    return snap.data() as AppBanner;
+  },
+
+  deleteBanner: async (id: string): Promise<{ success: boolean }> => {
+    const docRef = doc(db, 'banners', id);
+    try {
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data() as AppBanner;
+        // Cascade delete Cloudinary asset if present
+        try {
+          if (data.cloudinaryPublicId) {
+            await deleteCloudinaryAssetsHelper([data.cloudinaryPublicId], 'image');
+          } else if (data.imageUrl && data.imageUrl.includes('cloudinary.com')) {
+            const publicIdMatch = data.imageUrl.match(/\/upload\/(?:v\d+\/)?([^\.]+)/);
+            if (publicIdMatch && publicIdMatch[1]) {
+              await deleteCloudinaryAssetsHelper([publicIdMatch[1]], 'image');
+            }
+          }
+        } catch (cErr) {
+          console.warn('Cloudinary delete error during banner removal:', cErr);
+        }
+      }
+    } catch (err) {
+      console.warn('Error reading banner before delete:', err);
+    }
+    await deleteDoc(docRef);
+    return { success: true };
+  },
+
+  reorderBanners: async (orderedBannerIds: string[]): Promise<void> => {
+    const batch = writeBatch(db);
+    orderedBannerIds.forEach((id, index) => {
+      const docRef = doc(db, 'banners', id);
+      batch.update(docRef, { order: index + 1, updatedAt: new Date().toISOString() });
+    });
+    await batch.commit();
   },
 
   // -------------------------------------------------------------

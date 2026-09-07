@@ -6,7 +6,8 @@ import {
   User, 
   UserProgress, 
   SystemNotification, 
-  RealtimeEvent 
+  RealtimeEvent,
+  AppBanner
 } from './types';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
@@ -17,6 +18,7 @@ import { CoursesView } from './views/CoursesView';
 import { LessonEditorView } from './views/LessonEditorView';
 import { UsersView } from './views/UsersView';
 import { UnitsView } from './views/UnitsView';
+import { BannersView } from './views/BannersView';
 import { ProgressView } from './views/ProgressView';
 import { NotificationsView } from './views/NotificationsView';
 import { SettingsView } from './views/SettingsView';
@@ -37,6 +39,7 @@ export function App() {
   const [users, setUsers] = useState<User[]>([]);
   const [progressList, setProgressList] = useState<UserProgress[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
+  const [banners, setBanners] = useState<AppBanner[]>([]);
 
   // Navigation & Modal states
   const [selectedLessonForEditing, setSelectedLessonForEditing] = useState<Lesson | null>(null);
@@ -57,6 +60,7 @@ export function App() {
         usersRes,
         progressRes,
         notifsRes,
+        bannersRes,
       ] = await Promise.all([
         api.getCourses(false),
         api.getCourses(true),
@@ -66,6 +70,7 @@ export function App() {
         api.getUsers(),
         api.getProgress(),
         api.getNotifications(),
+        api.getBanners().catch(() => []),
       ]);
 
       setCourses(coursesRes);
@@ -76,6 +81,7 @@ export function App() {
       setUsers(usersRes);
       setProgressList(progressRes);
       setNotifications(notifsRes);
+      setBanners(bannersRes);
     } catch (err) {
       console.error('Error fetching initial data:', err);
     } finally {
@@ -299,6 +305,13 @@ export function App() {
               units={units}
               onCreateUnit={handleCreateUnit}
               onUpdateUnit={handleUpdateUnit}
+            />
+          ) : currentView === 'banners' ? (
+            <BannersView
+              banners={banners}
+              courses={courses}
+              lessons={lessons}
+              onRefresh={fetchAllData}
             />
           ) : currentView === 'progress' ? (
             <ProgressView progressList={progressList} units={units} />

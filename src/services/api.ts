@@ -32,7 +32,8 @@ import {
   LessonQuestion,
   SourceDocument,
   UserItemProgress,
-  UserSectionProgress
+  UserSectionProgress,
+  AppBanner
 } from '../types';
 
 /**
@@ -834,6 +835,98 @@ export const api = {
   deleteUnit: async (id: string): Promise<{ success: boolean }> => {
     await deleteDoc(doc(db, 'units', id));
     return { success: true };
+  },
+
+  // -------------------------------------------------------------
+  // POSTER / BANNER (Max 5 items for mobile app)
+  // -------------------------------------------------------------
+  getBanners: async (): Promise<AppBanner[]> => {
+    return await firestoreService.getBanners();
+  },
+
+  createBanner: async (data: Partial<AppBanner>): Promise<AppBanner> => {
+    return await firestoreService.createBanner(data);
+  },
+
+  updateBanner: async (id: string, data: Partial<AppBanner>): Promise<AppBanner> => {
+    return await firestoreService.updateBanner(id, data);
+  },
+
+  deleteBanner: async (id: string): Promise<{ success: boolean }> => {
+    return await firestoreService.deleteBanner(id);
+  },
+
+  reorderBanners: async (orderedBannerIds: string[]): Promise<void> => {
+    return await firestoreService.reorderBanners(orderedBannerIds);
+  },
+
+  uploadBannerImage: async (file: File): Promise<{ url: string; publicId: string }> => {
+    // 1. First choice: Cloudinary Unsigned Upload (using pre-configured working preset)
+    try {
+      const res = await cloudinaryUnsignedSlideProvider.uploadUnsignedSlide(file, {
+        category: 'banners',
+        lessonId: 'home_carousel',
+        resourceType: 'image',
+        filename: `banner_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+      });
+      if (res && (res.secureUrl || res.fileUrl)) {
+        return {
+          url: res.secureUrl || res.fileUrl,
+          publicId: res.publicId || ''
+        };
+      }
+    } catch (cldErr) {
+      console.warn('[uploadBannerImage] Cloudinary unsigned upload warning, trying server proxy:', cldErr);
+    }
+
+    // 2. Second choice: Server-side proxy /api/cloudinary/upload
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('category', 'banners');
+      formData.append('lessonId', 'home_carousel');
+
+      const res = await fetch('/api/cloudinary/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          const resolvedUrl = data.secureUrl || data.url || (data.data && (data.data.secure_url || data.data.url));
+          const resolvedId = data.publicId || (data.data && data.data.public_id) || '';
+          if (resolvedUrl) {
+            return {
+              url: resolvedUrl,
+              publicId: resolvedId
+            };
+          }
+        } catch {
+          // not valid JSON, proceed to Firebase
+        }
+      }
+    } catch (proxyErr) {
+      console.warn('[uploadBannerImage] Server upload proxy error, attempting Firebase fallback:', proxyErr);
+    }
+
+    // 3. Third choice (Guaranteed Fallback): Firebase Storage
+    try {
+      const fileId = `banner-${Date.now()}-${Math.round(Math.random() * 1000)}`;
+      const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const storagePath = `banners/home_carousel/${fileId}_${safeName}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      return {
+        url: downloadUrl,
+        publicId: fileId
+      };
+    } catch (fbErr: any) {
+      console.error('[uploadBannerImage] Tất cả các phương thức upload ảnh đều thất bại:', fbErr);
+      throw new Error(`Tải ảnh thất bại: ${fbErr.message || 'Lỗi lưu trữ ảnh'}`);
+    }
   },
 
   getUsers: async (): Promise<User[]> => {

@@ -2676,6 +2676,18 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                               <option value="short_answer">Trả lời ngắn</option>
                               <option value="essay">Tự luận</option>
                             </select>
+
+                            {(q.type === 'single_choice' || q.type === 'multiple_choice') && q.options && (
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border flex items-center space-x-1 ${
+                                q.options.length === 3
+                                  ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                  : q.options.length === 4
+                                  ? 'bg-blue-100 text-blue-900 border-blue-300'
+                                  : 'bg-slate-100 text-slate-800 border-slate-300'
+                              }`}>
+                                <span>{q.options.length === 3 ? '📌 [3 ĐÁP ÁN: A, B, C]' : q.options.length === 4 ? '📌 [4 ĐÁP ÁN: A, B, C, D]' : `📌 [${q.options.length} ĐÁP ÁN]`}</span>
+                              </span>
+                            )}
                           </div>
 
                           <div className="flex items-center space-x-2">

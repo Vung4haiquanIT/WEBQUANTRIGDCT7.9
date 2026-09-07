@@ -3267,12 +3267,40 @@ app.post('/api/cloudinary/upload', upload.single('file'), async (req: Request, r
   const resourceType = req.body.resourceType || (isDoc ? 'raw' : isMedia ? 'video' : 'auto');
 
   try {
-    const uploadResult: any = await cloudinary.uploader.upload(req.file.path, {
-      asset_folder: assetFolder,
-      resource_type: resourceType as any,
-      use_filename: true,
-      unique_filename: true
-    });
+    let uploadResult: any = null;
+
+    try {
+      uploadResult = await cloudinary.uploader.upload(req.file.path, {
+        asset_folder: assetFolder,
+        resource_type: resourceType as any,
+        use_filename: true,
+        unique_filename: true
+      });
+    } catch (signedErr: any) {
+      console.warn('[Cloudinary Signed Upload Error, attempting unsigned upload fallback]:', signedErr?.message || signedErr);
+      
+      const cloudName = process.env.CLOUDINARY_CLOUD_NAME || process.env.VITE_CLOUDINARY_CLOUD_NAME || 'ieplkoep';
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const blob = new Blob([fileBuffer]);
+      const unsignedFormData = new FormData();
+      unsignedFormData.append('file', blob, filename);
+      unsignedFormData.append('upload_preset', 'ugc-images');
+      if (assetFolder) unsignedFormData.append('asset_folder', assetFolder);
+
+      const targetResourceType = isDoc ? 'raw' : (isMedia ? 'video' : 'image');
+      const unsignedRes = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/${targetResourceType}/upload`, {
+        method: 'POST',
+        body: unsignedFormData
+      });
+
+      if (!unsignedRes.ok) {
+        const errorText = await unsignedRes.text();
+        console.error('[Cloudinary Unsigned Fallback Error]', errorText);
+        throw signedErr;
+      }
+
+      uploadResult = await unsignedRes.json();
+    }
 
     const originalFileSize = req.file ? req.file.size : 0;
     if (req.file && fs.existsSync(req.file.path)) {

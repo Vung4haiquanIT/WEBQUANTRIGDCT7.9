@@ -64,8 +64,8 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ progressList, units 
             className="bg-slate-50 border border-slate-200 text-slate-700 rounded-lg px-2.5 py-1.5 text-xs focus:outline-hidden focus:border-blue-500"
           >
             <option value="ALL">Tất cả đơn vị (Toàn Vùng)</option>
-            {units.map((u) => (
-              <option key={u.id} value={u.id}>
+            {units.map((u, uIdx) => (
+              <option key={u.id ? `unit-${u.id}` : `unit-idx-${uIdx}`} value={u.id}>
                 {u.name}
               </option>
             ))}
@@ -96,61 +96,64 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ progressList, units 
                   </td>
                 </tr>
               ) : (
-                filtered.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="p-4 font-bold text-slate-800">{item.userName}</td>
-                    <td className="p-4 text-slate-600">{item.unitName}</td>
-                    <td className="p-4 max-w-xs truncate text-slate-800 font-medium">
-                      {item.lessonTitle}
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center space-x-2 text-[10px]">
-                        <span title="Slide" className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
-                          Slide: {item.slideProgress}%
-                        </span>
-                        <span title="Nội dung" className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200">
-                          Đọc: {item.contentProgress}%
-                        </span>
-                        <span title="Video" className="bg-cyan-50 text-cyan-700 px-1.5 py-0.5 rounded border border-cyan-200">
-                          Video: {item.videoProgress}%
-                        </span>
-                        <span title="Audio" className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
-                          Audio: {item.audioProgress}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-24 bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                          <div
-                            className="bg-blue-600 h-full rounded-full"
-                            style={{ width: `${item.overallProgress}%` }}
-                          />
+                filtered.map((item, idx) => {
+                  const uniqueKey = item.id || `prog-${item.userId || 'u'}-${item.lessonId || 'l'}-${idx}`;
+                  return (
+                    <tr key={uniqueKey} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="p-4 font-bold text-slate-800">{item.userName}</td>
+                      <td className="p-4 text-slate-600">{item.unitName}</td>
+                      <td className="p-4 max-w-xs truncate text-slate-800 font-medium">
+                        {item.lessonTitle}
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center space-x-2 text-[10px]">
+                          <span title="Slide" className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200">
+                            Slide: {item.slideProgress}%
+                          </span>
+                          <span title="Nội dung" className="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200">
+                            Đọc: {item.contentProgress}%
+                          </span>
+                          <span title="Video" className="bg-cyan-50 text-cyan-700 px-1.5 py-0.5 rounded border border-cyan-200">
+                            Video: {item.videoProgress}%
+                          </span>
+                          <span title="Audio" className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded border border-emerald-200">
+                            Audio: {item.audioProgress}%
+                          </span>
                         </div>
-                        <span className="font-bold text-slate-700 font-mono text-[11px]">
-                          {item.overallProgress}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      {item.completed ? (
-                        <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px]">
-                          <CheckCircle className="w-3 h-3 text-emerald-500" />
-                          <span>Đã đạt chuẩn</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center space-x-1 text-amber-700 font-medium bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full text-[10px]">
-                          <Clock className="w-3 h-3 text-amber-500" />
-                          <span>Đang học</span>
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-4 text-right font-mono text-[10px] text-slate-500">
-                      {new Date(item.lastAccessedAt).toLocaleTimeString('vi-VN')}{' '}
-                      {new Date(item.lastAccessedAt).toLocaleDateString('vi-VN')}
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-24 bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
+                            <div
+                              className="bg-blue-600 h-full rounded-full"
+                              style={{ width: `${item.overallProgress}%` }}
+                            />
+                          </div>
+                          <span className="font-bold text-slate-700 font-mono text-[11px]">
+                            {item.overallProgress}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-4">
+                        {item.completed ? (
+                          <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px]">
+                            <CheckCircle className="w-3 h-3 text-emerald-500" />
+                            <span>Đã đạt chuẩn</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center space-x-1 text-amber-700 font-medium bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full text-[10px]">
+                            <Clock className="w-3 h-3 text-amber-500" />
+                            <span>Đang học</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-right font-mono text-[10px] text-slate-500">
+                        {new Date(item.lastAccessedAt).toLocaleTimeString('vi-VN')}{' '}
+                        {new Date(item.lastAccessedAt).toLocaleDateString('vi-VN')}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

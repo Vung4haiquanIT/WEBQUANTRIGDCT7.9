@@ -9,11 +9,12 @@ import {
   Settings,
   Shield,
   ShieldCheck,
-  Layers
+  Layers,
+  Image as ImageIcon
 } from 'lucide-react';
 import { DongSonDrum, DongSonBorder } from './DongSonMotif';
 
-export type NavTab = 'dashboard' | 'courses' | 'users' | 'units' | 'progress' | 'notifications' | 'settings' | 'firebase-diagnostics';
+export type NavTab = 'dashboard' | 'courses' | 'users' | 'units' | 'banners' | 'progress' | 'notifications' | 'settings' | 'firebase-diagnostics';
 
 export interface SidebarProps {
   activeTab: NavTab | string;
@@ -66,6 +67,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'ĐƠN VỊ',
       icon: Building2,
       badge: null,
+    },
+    {
+      id: 'banners' as NavTab,
+      label: 'POSTER / BANNER',
+      icon: ImageIcon,
+      badge: 'APP',
     },
     {
       id: 'progress' as NavTab,

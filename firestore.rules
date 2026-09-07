@@ -255,5 +255,12 @@ service cloud.firestore {
       allow update: if isContentAdmin() && isValidId(fileId) && isValidStorageFile(incoming()) && incoming().id == existing().id;
       allow delete: if isSuperAdmin() && isValidId(fileId);
     }
+
+    // Banners & Posters Collection (App mobile home carousel)
+    match /banners/{bannerId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(bannerId);
+      allow delete: if isValidId(bannerId);
+    }
   }
 }
