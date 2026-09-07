@@ -5,15 +5,10 @@ import {
   Edit3, 
   CheckCircle,
   XCircle,
-  Search,
-  ShieldAlert,
-  FileCheck2,
-  Smartphone,
-  Info,
-  Building2,
-  Award
+  Search
 } from 'lucide-react';
 import { User, UserRole, Unit } from '../types';
+import { api } from '../services/api';
 
 interface UsersViewProps {
   users: User[];
@@ -21,6 +16,7 @@ interface UsersViewProps {
   onCreateUser: (user: Partial<User>) => Promise<void>;
   onUpdateUser: (id: string, user: Partial<User>) => Promise<void>;
   onDeleteUser: (id: string) => Promise<void>;
+  onCreateUnit?: (unit: Partial<Unit>) => Promise<Unit>;
 }
 
 export const UsersView: React.FC<UsersViewProps> = ({
@@ -29,12 +25,16 @@ export const UsersView: React.FC<UsersViewProps> = ({
   onCreateUser,
   onUpdateUser,
   onDeleteUser,
+  onCreateUnit,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<UserRole | 'ALL'>('ALL');
   const [unitFilter, setUnitFilter] = useState<string>('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isCreatingNewUnit, setIsCreatingNewUnit] = useState(false);
+  const [newUnitName, setNewUnitName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -75,7 +75,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
     const matchRole = roleFilter === 'ALL' || userRole === roleFilter;
     const matchUnit = unitFilter === 'ALL' || u.unitId === unitFilter || userUnit.toLowerCase().includes(unitFilter.toLowerCase());
 
-    return matchSearch && matchRole;
+    return matchSearch && matchRole && matchUnit;
   });
 
   // Role Counts
@@ -85,42 +85,80 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
   const handleOpenNew = () => {
     setEditingUser(null);
-    const defaultUnit = units[0]?.name || 'Bộ Tư lệnh Vùng 4 Hải Quân';
-    setFormData({
-      fullName: '',
-      email: '',
-      password: '123@abc',
-      role: 'USER',
-      rank: 'Đại úy',
-      position: 'Chính trị viên',
-      rankAndPosition: 'Đại úy - Chính trị viên',
-      unitId: units[0]?.id || 'unit-1',
-      unit: defaultUnit,
-      status: 'ACTIVE',
-    });
+    if (units.length === 0) {
+      setIsCreatingNewUnit(true);
+      setNewUnitName('');
+      setFormData({
+        fullName: '',
+        email: '',
+        password: '123@abc',
+        role: 'USER',
+        rank: 'Đại úy',
+        position: 'Chính trị viên',
+        rankAndPosition: 'Đại úy - Chính trị viên',
+        unitId: '__NEW__',
+        unit: '',
+        status: 'ACTIVE',
+      });
+    } else {
+      setIsCreatingNewUnit(false);
+      setNewUnitName('');
+      setFormData({
+        fullName: '',
+        email: '',
+        password: '123@abc',
+        role: 'USER',
+        rank: 'Đại úy',
+        position: 'Chính trị viên',
+        rankAndPosition: 'Đại úy - Chính trị viên',
+        unitId: units[0].id,
+        unit: units[0].name,
+        status: 'ACTIVE',
+      });
+    }
     setIsModalOpen(true);
   };
 
   const handleOpenEdit = (u: User) => {
     setEditingUser(u);
     const normRole = normalizeRole(u.role);
-    const r = u.rank || 'Đại úy';
-    const p = u.position || 'Cán bộ';
-    const rankPos = u.rankAndPosition || `${r} - ${p}`;
+    const r = u.rank || '';
+    const p = u.position || '';
+    const rankPos = u.rankAndPosition || (r && p ? `${r} - ${p}` : r || p);
     const matchedUnit = units.find(unitItem => unitItem.id === u.unitId || unitItem.name === (u.unit || u.unitName));
 
-    setFormData({
-      fullName: u.fullName || u.name,
-      email: u.email,
-      password: u.password || '123@abc',
-      role: normRole,
-      rank: r,
-      position: p,
-      rankAndPosition: rankPos,
-      unitId: matchedUnit?.id || u.unitId || units[0]?.id || 'unit-1',
-      unit: matchedUnit?.name || u.unit || u.unitName || 'Bộ Tư lệnh Vùng 4 Hải Quân',
-      status: u.status || 'ACTIVE',
-    });
+    if (matchedUnit) {
+      setIsCreatingNewUnit(false);
+      setNewUnitName('');
+      setFormData({
+        fullName: u.fullName || u.name,
+        email: u.email,
+        password: u.password || '123@abc',
+        role: normRole,
+        rank: r,
+        position: p,
+        rankAndPosition: rankPos,
+        unitId: matchedUnit.id,
+        unit: matchedUnit.name,
+        status: u.status || 'ACTIVE',
+      });
+    } else {
+      const customUnit = u.unit || u.unitName || '';
+      setIsCreatingNewUnit(true);
+      setNewUnitName(customUnit);
+      setFormData({
+        fullName: u.fullName || u.name,
+        email: u.email,
+        password: u.password || '123@abc',
+        role: normRole,
+        rank: r,
+        position: p,
+        rankAndPosition: rankPos,
+        unitId: '__NEW__',
+        unit: customUnit,
+        status: u.status || 'ACTIVE',
+      });
+    }
     setIsModalOpen(true);
   };
 
@@ -147,171 +185,128 @@ export const UsersView: React.FC<UsersViewProps> = ({
     e.preventDefault();
     if (!formData.fullName.trim() || !formData.email.trim()) return;
 
+    let finalUnitId = formData.unitId;
+    let finalUnitName = formData.unit;
+
+    if (isCreatingNewUnit || units.length === 0 || finalUnitId === '__NEW__') {
+      const unitNameTrimmed = (newUnitName || formData.unit || '').trim();
+      if (!unitNameTrimmed) {
+        alert('Vui lòng nhập tên đơn vị');
+        return;
+      }
+
+      // Kiểm tra xem đơn vị này đã có sẵn trong danh mục đơn vị chưa
+      const existing = units.find(u => u.name.trim().toLowerCase() === unitNameTrimmed.toLowerCase());
+      if (existing) {
+        finalUnitId = existing.id;
+        finalUnitName = existing.name;
+      } else {
+        try {
+          setIsSaving(true);
+          const unitData: Partial<Unit> = {
+            name: unitNameTrimmed,
+            code: `DV-${Date.now().toString().slice(-4)}`,
+            type: 'BRIGADE',
+            status: 'ACTIVE',
+            memberCount: 0
+          };
+          const createdUnit = onCreateUnit ? await onCreateUnit(unitData) : await api.createUnit(unitData);
+          if (createdUnit) {
+            finalUnitId = createdUnit.id;
+            finalUnitName = createdUnit.name;
+          } else {
+            finalUnitId = `unit-${Date.now()}`;
+            finalUnitName = unitNameTrimmed;
+          }
+        } catch (err) {
+          console.error('Lỗi tạo đơn vị mới:', err);
+          finalUnitId = `unit-${Date.now()}`;
+          finalUnitName = unitNameTrimmed;
+        }
+      }
+    } else {
+      const matched = units.find(u => u.id === finalUnitId);
+      if (matched) {
+        finalUnitName = matched.name;
+      }
+    }
+
     const payload: Partial<User> = {
       name: formData.fullName.trim(),
       fullName: formData.fullName.trim(),
       email: formData.email.trim(),
+      password: formData.password.trim(),
       role: formData.role,
       rank: formData.rank.trim(),
       position: formData.position.trim(),
       rankAndPosition: formData.rankAndPosition.trim() || `${formData.rank} - ${formData.position}`.trim(),
-      unitId: formData.unitId,
-      unitName: formData.unit,
-      unit: formData.unit,
+      unitId: finalUnitId,
+      unitName: finalUnitName,
+      unit: finalUnitName,
       status: formData.status,
     };
 
-    if (editingUser) {
-      await onUpdateUser(editingUser.id, payload);
-    } else {
-      await onCreateUser(payload);
+    try {
+      setIsSaving(true);
+      if (editingUser) {
+        await onUpdateUser(editingUser.id, payload);
+      } else {
+        await onCreateUser(payload);
+      }
+      setIsModalOpen(false);
+    } catch (err) {
+      console.error('Lỗi lưu tài khoản người dùng:', err);
+    } finally {
+      setIsSaving(false);
     }
-    setIsModalOpen(false);
   };
 
-  // Badge component matching the strict design guidelines
   const renderRoleBadge = (role: string) => {
     const norm = normalizeRole(role);
     switch (norm) {
       case 'ADMIN':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-purple-100 text-purple-700 border border-purple-200">
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>ADMIN (Quản trị viên)</span>
+          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
+            Quản trị viên
           </span>
         );
       case 'APPROVER':
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-amber-100 text-amber-700 border border-amber-200">
-            <FileCheck2 className="w-3.5 h-3.5" />
-            <span>NGƯỜI PHÊ DUYỆT</span>
+          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+            Người phê duyệt
           </span>
         );
       case 'USER':
       default:
         return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-blue-100 text-blue-700 border border-blue-200">
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>NGƯỜI DÙNG (Chiến sĩ)</span>
+          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+            Người dùng
           </span>
         );
     }
   };
 
   return (
-    <div className="space-y-6 pb-12">
-      {/* Header with Title and Action */}
+    <div className="space-y-5 pb-12">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-              Phân quyền & Tài khoản
-            </span>
-            <span className="text-xs text-slate-500 font-mono">Hệ thống 3 Vai trò Chuẩn hóa</span>
-          </div>
-          <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight mt-1">
-            QUẢN LÝ NGƯỜI DÙNG & TÀI KHOẢN QUÂN SỰ
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">
+            QUẢN LÝ NGƯỜI DÙNG
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Quản trị danh sách tài khoản Web Admin và phân quyền người dùng đăng nhập trên ứng dụng Mobile Android (APK).
+          <p className="text-xs text-slate-500 mt-1">
+            Danh sách tài khoản hệ thống ({users.length})
           </p>
         </div>
 
         <button
           id="btn-add-user"
           onClick={handleOpenNew}
-          className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-xs transition-all self-start sm:self-auto cursor-pointer"
+          className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-medium text-xs shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
         >
           <UserPlus className="w-4 h-4" />
-          <span>Thêm Người dùng</span>
+          <span>Thêm người dùng</span>
         </button>
-      </div>
-
-      {/* 3 Role Definition Cards (Visual Breakdown) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card ADMIN */}
-        <div 
-          onClick={() => setRoleFilter(roleFilter === 'ADMIN' ? 'ALL' : 'ADMIN')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            roleFilter === 'ADMIN' 
-              ? 'bg-purple-50/80 border-purple-300 ring-2 ring-purple-400' 
-              : 'bg-white border-slate-200 hover:border-purple-200 hover:bg-purple-50/30 shadow-xs'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
-                <ShieldAlert className="w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-800">ADMIN (Quản trị viên)</h4>
-                <p className="text-[10px] text-purple-700 font-semibold">Toàn quyền hệ thống (Full Access)</p>
-              </div>
-            </div>
-            <span className="text-sm font-extrabold text-purple-800 bg-purple-100 px-2.5 py-0.5 rounded-full font-mono">
-              {countAdmin}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-600 mt-2.5 leading-relaxed">
-            Quản lý người dùng, đơn vị quân sự, cài đặt hệ thống, chẩn đoán Firebase, biên soạn và phê duyệt nội dung bài giảng.
-          </p>
-        </div>
-
-        {/* Card APPROVER */}
-        <div 
-          onClick={() => setRoleFilter(roleFilter === 'APPROVER' ? 'ALL' : 'APPROVER')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            roleFilter === 'APPROVER' 
-              ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-400' 
-              : 'bg-white border-slate-200 hover:border-amber-200 hover:bg-amber-50/30 shadow-xs'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
-                <FileCheck2 className="w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-800">NGƯỜI PHÊ DUYỆT</h4>
-                <p className="text-[10px] text-amber-700 font-semibold">Kiểm duyệt & Xuất bản bài giảng</p>
-              </div>
-            </div>
-            <span className="text-sm font-extrabold text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-full font-mono">
-              {countApprover}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-600 mt-2.5 leading-relaxed">
-            Xem tài liệu, kiểm duyệt bài giảng để xuất bản (Public) lên App. Nhận thông báo khi có nội dung mới gửi duyệt.
-          </p>
-        </div>
-
-        {/* Card USER */}
-        <div 
-          onClick={() => setRoleFilter(roleFilter === 'USER' ? 'ALL' : 'USER')}
-          className={`p-4 rounded-2xl border transition-all cursor-pointer ${
-            roleFilter === 'USER' 
-              ? 'bg-blue-50/80 border-blue-300 ring-2 ring-blue-400' 
-              : 'bg-white border-slate-200 hover:border-blue-200 hover:bg-blue-50/30 shadow-xs'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                <Smartphone className="w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-slate-800">NGƯỜI DÙNG (Chiến sĩ)</h4>
-                <p className="text-[10px] text-blue-700 font-semibold">Đăng nhập Mobile App Android</p>
-              </div>
-            </div>
-            <span className="text-sm font-extrabold text-blue-800 bg-blue-100 px-2.5 py-0.5 rounded-full font-mono">
-              {countUser}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-600 mt-2.5 leading-relaxed">
-            Tài khoản tạo sẵn từ Web Admin để học viên/chiến sĩ đăng nhập App APK. Tự động đồng bộ tiến độ học và điểm kiểm tra.
-          </p>
-        </div>
       </div>
 
       {/* Filter toolbar */}
@@ -320,7 +315,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
           <input
             id="input-search-users"
             type="text"
-            placeholder="Tìm theo họ tên, cấp bậc, chức vụ, đơn vị, email..."
+            placeholder="Tìm theo họ tên, cấp bậc, đơn vị, email..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full bg-slate-50 border border-slate-200 text-slate-800 placeholder-slate-400 text-xs rounded-xl pl-9 pr-3 py-2.5 focus:outline-hidden focus:border-blue-500 focus:bg-white transition-colors"
@@ -329,30 +324,28 @@ export const UsersView: React.FC<UsersViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 text-xs">
-          {/* Dropdown Lọc vai trò chuẩn hóa */}
           <div className="flex items-center space-x-2">
-            <span className="text-slate-600 font-semibold">Vai trò:</span>
+            <span className="text-slate-600 font-medium">Vai trò:</span>
             <select
               id="select-role-filter"
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value as any)}
               className="bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-3 py-2 text-xs focus:outline-hidden focus:border-blue-500 font-medium cursor-pointer"
             >
-              <option value="ALL">Tất cả vai trò ({users.length})</option>
-              <option value="ADMIN">Admin (Quản trị viên) ({countAdmin})</option>
+              <option value="ALL">Tất cả ({users.length})</option>
+              <option value="ADMIN">Quản trị viên ({countAdmin})</option>
               <option value="APPROVER">Người phê duyệt ({countApprover})</option>
-              <option value="USER">Người dùng (Học viên / Chiến sĩ) ({countUser})</option>
+              <option value="USER">Người dùng ({countUser})</option>
             </select>
           </div>
 
-          {/* Unit Filter */}
           <div className="flex items-center space-x-2">
-            <span className="text-slate-600 font-semibold">Đơn vị:</span>
+            <span className="text-slate-600 font-medium">Đơn vị:</span>
             <select
               id="select-unit-filter"
               value={unitFilter}
               onChange={(e) => setUnitFilter(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-3 py-2 text-xs focus:outline-hidden focus:border-blue-500 font-medium max-w-[180px] truncate cursor-pointer"
+              className="bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-3 py-2 text-xs focus:outline-hidden focus:border-blue-500 font-medium max-w-[200px] truncate cursor-pointer"
             >
               <option value="ALL">Tất cả đơn vị</option>
               {units.map(u => (
@@ -367,12 +360,12 @@ export const UsersView: React.FC<UsersViewProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 font-bold">
+            <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200 font-semibold">
               <tr>
                 <th className="p-4">Họ và tên</th>
                 <th className="p-4">Cấp bậc & Chức vụ</th>
-                <th className="p-4">Đơn vị trực thuộc</th>
-                <th className="p-4">Vai trò (Role)</th>
+                <th className="p-4">Đơn vị</th>
+                <th className="p-4">Vai trò</th>
                 <th className="p-4">Trạng thái</th>
                 <th className="p-4 text-right">Hành động</th>
               </tr>
@@ -381,63 +374,48 @@ export const UsersView: React.FC<UsersViewProps> = ({
               {filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-slate-400">
-                    Không tìm thấy quân nhân hoặc tài khoản phù hợp với bộ lọc.
+                    Không tìm thấy người dùng phù hợp.
                   </td>
                 </tr>
               ) : (
                 filteredUsers.map((u) => {
                   const displayName = u.fullName || u.name;
-                  const rankPos = u.rankAndPosition || (u.rank && u.position ? `${u.rank} - ${u.position}` : u.rank || u.position || 'Chiến sĩ Hải Quân');
-                  const unitDisplayName = u.unit || u.unitName || 'Bộ Tư lệnh Vùng 4 Hải Quân';
+                  const rankPos = u.rankAndPosition || (u.rank && u.position ? `${u.rank} - ${u.position}` : u.rank || u.position || '—');
+                  const unitDisplayName = u.unit || u.unitName || '—';
                   const isActive = u.status !== 'INACTIVE';
 
                   return (
                     <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-4">
                         <div className="flex items-center space-x-3">
-                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 p-0.5 shrink-0 flex items-center justify-center font-bold text-white text-xs shadow-xs">
+                          <div className="w-9 h-9 rounded-xl bg-blue-600 shrink-0 flex items-center justify-center font-bold text-white text-xs">
                             {displayName.substring(0, 1).toUpperCase()}
                           </div>
                           <div>
-                            <div className="font-bold text-slate-900">{displayName}</div>
-                            <div className="text-[10px] text-slate-500 font-mono flex items-center space-x-1.5 mt-0.5">
-                              <span>📧 {u.email}</span>
-                              <span>•</span>
-                              <span className="text-blue-700 font-bold bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200" title="Mật khẩu đăng nhập App">
-                                🔑 {u.password || '123@abc'}
-                              </span>
+                            <div className="font-semibold text-slate-900">{displayName}</div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {u.email}
                             </div>
                           </div>
                         </div>
                       </td>
                       <td className="p-4">
-                        <div className="flex items-center space-x-1.5">
-                          <Award className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span className="font-semibold text-slate-800">{rankPos}</span>
-                        </div>
-                        {u.rank && u.position && (
-                          <div className="text-[10px] text-slate-400 mt-0.5">
-                            Cấp bậc: {u.rank} | Chức vụ: {u.position}
-                          </div>
-                        )}
+                        <span className="font-medium text-slate-800">{rankPos}</span>
                       </td>
                       <td className="p-4">
-                        <div className="flex items-center space-x-1.5 text-slate-700 font-medium">
-                          <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                          <span className="truncate max-w-[220px]" title={unitDisplayName}>
-                            {unitDisplayName}
-                          </span>
-                        </div>
+                        <span className="text-slate-700 font-medium truncate max-w-[220px] block" title={unitDisplayName}>
+                          {unitDisplayName}
+                        </span>
                       </td>
                       <td className="p-4">{renderRoleBadge(u.role)}</td>
                       <td className="p-4">
                         {isActive ? (
-                          <span className="inline-flex items-center space-x-1 text-emerald-700 font-semibold text-[11px] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          <span className="inline-flex items-center space-x-1 text-emerald-700 font-medium text-[11px] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                             <CheckCircle className="w-3 h-3 text-emerald-600" />
                             <span>Hoạt động</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center space-x-1 text-slate-500 font-semibold text-[11px] bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                          <span className="inline-flex items-center space-x-1 text-slate-500 font-medium text-[11px] bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
                             <XCircle className="w-3 h-3 text-slate-400" />
                             <span>Tạm khóa</span>
                           </span>
@@ -447,7 +425,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
                         <div className="flex items-center justify-end space-x-2">
                           <button
                             onClick={() => handleOpenEdit(u)}
-                            title="Chỉnh sửa thông tin quân nhân"
+                            title="Chỉnh sửa"
                             className="p-1.5 rounded-lg bg-slate-50 text-slate-600 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 transition-colors cursor-pointer"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
@@ -458,7 +436,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
                                 onDeleteUser(u.id);
                               }
                             }}
-                            title="Xóa tài khoản"
+                            title="Xóa"
                             className="p-1.5 rounded-lg bg-slate-50 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 transition-colors cursor-pointer"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -477,16 +455,11 @@ export const UsersView: React.FC<UsersViewProps> = ({
       {/* Modal: Create / Edit User */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl p-6 space-y-5">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-tight">
-                  {editingUser ? 'Chỉnh sửa thông tin quân nhân' : 'Thêm Người dùng / Quân nhân mới'}
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  Tài khoản tạo mới sẽ được cấu hình vai trò và cấp quyền truy cập hệ thống theo đúng quy định.
-                </p>
-              </div>
+              <h3 className="text-base font-bold text-slate-800">
+                {editingUser ? 'Chỉnh sửa người dùng' : 'Thêm người dùng'}
+              </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
                 className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
@@ -495,85 +468,74 @@ export const UsersView: React.FC<UsersViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-              {/* Họ và tên */}
+            <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-slate-700 font-bold mb-1">
-                  Họ và tên quân nhân / cán bộ <span className="text-red-500">*</span>
+                <label className="block text-slate-700 font-semibold mb-1">
+                  Họ và tên <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="form-user-fullname"
                   type="text"
                   required
-                  placeholder="Ví dụ: Nguyễn Văn Nam"
+                  placeholder="Nguyễn Văn A"
                   value={formData.fullName}
                   onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white font-medium"
                 />
               </div>
 
-              {/* Email */}
               <div>
-                <label className="block text-slate-700 font-bold mb-1">
-                  Email quân sự (Tài khoản đăng nhập) <span className="text-red-500">*</span>
+                <label className="block text-slate-700 font-semibold mb-1">
+                  Email <span className="text-red-500">*</span>
                 </label>
                 <input
                   id="form-user-email"
                   type="email"
                   required
-                  placeholder="nam.nv@navy.mil.vn"
+                  placeholder="email@example.com"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-mono text-[11px] focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
                 />
               </div>
 
-              {/* Mật khẩu đăng nhập App */}
               <div>
-                <label className="block text-slate-700 font-bold mb-1">
-                  Mật khẩu đăng nhập App <span className="text-red-500">*</span>
+                <label className="block text-slate-700 font-semibold mb-1">
+                  Mật khẩu <span className="text-red-500">*</span>
                 </label>
-                <div className="relative">
-                  <input
-                    id="form-user-password"
-                    type="text"
-                    required
-                    placeholder="Mật khẩu (mặc định 123@abc)"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-mono text-xs focus:outline-hidden focus:border-blue-500 focus:bg-white"
-                  />
-                  <span className="absolute right-3 top-2.5 text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                    Mặc định: 123@abc
-                  </span>
-                </div>
+                <input
+                  id="form-user-password"
+                  type="text"
+                  required
+                  placeholder="Mật khẩu đăng nhập"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
+                />
               </div>
 
-              {/* Cấp bậc & Chức vụ */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Cấp bậc <span className="text-red-500">*</span>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Cấp bậc
                   </label>
                   <input
                     id="form-user-rank"
                     type="text"
-                    required
-                    placeholder="Đại úy, Thượng úy..."
+                    placeholder="Đại úy"
                     value={formData.rank}
                     onChange={(e) => handleRankOrPosChange(e.target.value, formData.position)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Chức vụ <span className="text-red-500">*</span>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Chức vụ
                   </label>
                   <input
                     id="form-user-position"
                     type="text"
-                    required
-                    placeholder="Chính trị viên, TLTH..."
+                    placeholder="Chính trị viên"
                     value={formData.position}
                     onChange={(e) => handleRankOrPosChange(formData.rank, e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white"
@@ -581,60 +543,85 @@ export const UsersView: React.FC<UsersViewProps> = ({
                 </div>
               </div>
 
-              {/* Cấp bậc & Chức vụ gộp (Preview/Edit) */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
-                  Cấp bậc & Chức vụ hiển thị (rankAndPosition)
-                </label>
-                <input
-                  id="form-user-rank-position"
-                  type="text"
-                  placeholder="Ví dụ: Thượng úy - TLTH"
-                  value={formData.rankAndPosition}
-                  onChange={(e) => setFormData({ ...formData, rankAndPosition: e.target.value })}
-                  className="w-full bg-slate-100 border border-slate-200 rounded-xl p-2.5 text-slate-700 text-xs focus:outline-hidden focus:bg-white"
-                />
-              </div>
-
-              {/* Đơn vị & Vai trò */}
               <div className="grid grid-cols-2 gap-3">
+                {/* Đơn vị: Hỗ trợ chọn có sẵn hoặc tự động tạo mới để đồng bộ */}
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Đơn vị trực thuộc <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    id="form-user-unit"
-                    value={formData.unitId}
-                    onChange={(e) => handleUnitChange(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden font-medium cursor-pointer"
-                  >
-                    {units.map((unit) => (
-                      <option key={unit.id} value={unit.id}>
-                        {unit.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-700 font-semibold">
+                      Đơn vị <span className="text-red-500">*</span>
+                    </label>
+                    {units.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !isCreatingNewUnit;
+                          setIsCreatingNewUnit(next);
+                          if (next) {
+                            setNewUnitName(formData.unit || '');
+                          }
+                        }}
+                        className="text-[11px] text-blue-600 hover:text-blue-700 hover:underline font-medium cursor-pointer"
+                      >
+                        {isCreatingNewUnit ? '← Chọn có sẵn' : '+ Tạo mới'}
+                      </button>
+                    )}
+                  </div>
+                  {isCreatingNewUnit || units.length === 0 ? (
+                    <input
+                      id="form-user-new-unit"
+                      type="text"
+                      required
+                      placeholder="Nhập tên đơn vị mới..."
+                      value={newUnitName}
+                      onChange={(e) => {
+                        setNewUnitName(e.target.value);
+                        setFormData(prev => ({ ...prev, unit: e.target.value }));
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white font-medium"
+                    />
+                  ) : (
+                    <select
+                      id="form-user-unit"
+                      value={formData.unitId}
+                      onChange={(e) => {
+                        if (e.target.value === '__NEW__') {
+                          setIsCreatingNewUnit(true);
+                          setNewUnitName('');
+                        } else {
+                          handleUnitChange(e.target.value);
+                        }
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden font-medium cursor-pointer"
+                    >
+                      {units.map((unit) => (
+                        <option key={unit.id} value={unit.id}>
+                          {unit.name}
+                        </option>
+                      ))}
+                      <option value="__NEW__">+ Tạo đơn vị mới...</option>
+                    </select>
+                  )}
                 </div>
+
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">
-                    Vai trò & Phân quyền <span className="text-red-500">*</span>
+                  <label className="block text-slate-700 font-semibold mb-1">
+                    Vai trò <span className="text-red-500">*</span>
                   </label>
                   <select
                     id="form-user-role"
                     value={formData.role}
                     onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden font-bold cursor-pointer"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden font-medium cursor-pointer"
                   >
-                    <option value="USER">NGƯỜI DÙNG (Chiến sĩ)</option>
-                    <option value="APPROVER">NGƯỜI PHÊ DUYỆT</option>
-                    <option value="ADMIN">ADMIN (Quản trị viên)</option>
+                    <option value="USER">Người dùng</option>
+                    <option value="APPROVER">Người phê duyệt</option>
+                    <option value="ADMIN">Quản trị viên</option>
                   </select>
                 </div>
               </div>
 
-              {/* Trạng thái hoạt động */}
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Trạng thái tài khoản</label>
+                <label className="block text-slate-700 font-semibold mb-1">Trạng thái</label>
                 <div className="flex items-center space-x-4 pt-1">
                   <label className="inline-flex items-center space-x-2 cursor-pointer">
                     <input
@@ -644,7 +631,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
                       onChange={() => setFormData({ ...formData, status: 'ACTIVE' })}
                       className="text-blue-600 focus:ring-blue-500"
                     />
-                    <span className="font-semibold text-emerald-700">Hoạt động (Cho phép đăng nhập)</span>
+                    <span className="font-medium text-emerald-700">Hoạt động</span>
                   </label>
                   <label className="inline-flex items-center space-x-2 cursor-pointer">
                     <input
@@ -654,48 +641,30 @@ export const UsersView: React.FC<UsersViewProps> = ({
                       onChange={() => setFormData({ ...formData, status: 'INACTIVE' })}
                       className="text-slate-600 focus:ring-slate-500"
                     />
-                    <span className="font-semibold text-slate-600">Tạm khóa</span>
+                    <span className="font-medium text-slate-600">Tạm khóa</span>
                   </label>
                 </div>
               </div>
 
-              {/* Role Context Explanation Helper Box */}
-              <div className="p-3 rounded-xl border text-[11px] leading-relaxed flex items-start space-x-2.5 bg-slate-50 border-slate-200">
-                <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-                <div>
-                  {formData.role === 'ADMIN' && (
-                    <p className="text-purple-900 font-medium">
-                      <strong className="text-purple-700">ADMIN (Quản trị viên):</strong> Có toàn quyền quản trị hệ thống (Full Access): Quản lý người dùng, đơn vị, cài đặt hệ thống, chẩn đoán Firebase, biên soạn và phê duyệt nội dung bài giảng.
-                    </p>
-                  )}
-                  {formData.role === 'APPROVER' && (
-                    <p className="text-amber-900 font-medium">
-                      <strong className="text-amber-700">NGƯỜI PHÊ DUYỆT:</strong> Xem tài liệu, duyệt bài giảng để xuất bản (Public) cho người dùng xem trên App. Nhận thông báo trong App/Web khi có bài viết/bài giảng mới gửi duyệt để thực hiện phê duyệt hoặc từ chối. Không có quyền quản lý hệ thống.
-                    </p>
-                  )}
-                  {formData.role === 'USER' && (
-                    <p className="text-blue-900 font-medium">
-                      <strong className="text-blue-700">NGƯỜI DÙNG / CHIẾN SĨ:</strong> Tài khoản được tạo từ Web Admin để học viên/chiến sĩ đăng nhập trên App Android. Hiển thị rõ Họ tên, Cấp bậc, Chức vụ, Đơn vị. Dữ liệu học tập & điểm kiểm tra sẽ đồng bộ về Web Admin.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end space-x-2.5 pt-2 border-t border-slate-100">
+              <div className="flex justify-end space-x-2.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
+                  disabled={isSaving}
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors cursor-pointer"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Hủy
                 </button>
                 <button 
                   id="btn-save-user"
                   type="submit" 
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                  disabled={isSaving}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center space-x-1.5"
                 >
-                  {editingUser ? 'Lưu thay đổi' : 'Tạo tài khoản'}
+                  {isSaving && (
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  <span>{editingUser ? 'Lưu thay đổi' : 'Tạo tài khoản'}</span>
                 </button>
               </div>
             </form>

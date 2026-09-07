@@ -180,9 +180,10 @@ export function App() {
   // -------------------------------------------------------------
   // Unit CRUD Handlers
   // -------------------------------------------------------------
-  const handleCreateUnit = async (data: Partial<Unit>) => {
-    await api.createUnit(data);
+  const handleCreateUnit = async (data: Partial<Unit>): Promise<Unit> => {
+    const res = await api.createUnit(data);
     await fetchAllData();
+    return res;
   };
 
   const handleUpdateUnit = async (id: string, data: Partial<Unit>) => {
@@ -291,6 +292,7 @@ export function App() {
               onCreateUser={handleCreateUser}
               onUpdateUser={handleUpdateUser}
               onDeleteUser={handleDeleteUser}
+              onCreateUnit={handleCreateUnit}
             />
           ) : currentView === 'units' ? (
             <UnitsView
