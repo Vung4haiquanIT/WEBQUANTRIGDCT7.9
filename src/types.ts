@@ -794,8 +794,10 @@ export interface ExamSession {
   durationMinutes: number;          // Thời gian làm bài (phút), vd: 20
   passScore: number;                // Điểm đạt (trên thang điểm 10), vd: 5.0
   totalQuestions: number;
+  questions?: ExamQuestion[];        // Toàn bộ bộ câu hỏi đẩy lên App di động
   targetUnit: string;               // 'ALL' hoặc tên Đơn vị cụ thể
   status: 'DRAFT' | 'ACTIVE' | 'COMPLETED'; // Trạng thái đợt kiểm tra
+  pushedToAppAt?: string;           // Thời điểm đồng bộ bộ đề lên Cloud App
   startTime?: string;
   endTime?: string;
   createdBy: string;

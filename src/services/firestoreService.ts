@@ -46,7 +46,9 @@ import {
   ExamBank,
   ExamQuestion,
   ExamSession,
-  ExamSubmission
+  ExamSubmission,
+  UserFeedback,
+  FeedbackStatus
 } from '../types';
 import { 
   isFixedCourse, 
@@ -60,16 +62,22 @@ import {
 // =============================================================
 
 // Helper to remove undefined values before sending to Firestore
-function sanitizeFirestoreData(data: Record<string, any>): Record<string, any> {
+function sanitizeFirestoreData(data: any): any {
+  if (data === undefined) return null;
+  if (data === null || typeof data !== 'object') return data;
+  if (data instanceof Date) return data;
+
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeFirestoreData(item));
+  }
+
   const clean: Record<string, any> = {};
   Object.keys(data).forEach((key) => {
     const val = data[key];
     if (val !== undefined) {
-      if (val && typeof val === 'object' && !Array.isArray(val) && !(val instanceof Date)) {
-        clean[key] = sanitizeFirestoreData(val);
-      } else {
-        clean[key] = val;
-      }
+      clean[key] = sanitizeFirestoreData(val);
     }
   });
   return clean;
@@ -1473,7 +1481,105 @@ export const firestoreService = {
   getUsers: async (): Promise<User[]> => {
     const colRef = collection(db, 'users');
     const snap = await getDocs(colRef);
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as User));
+    return snap.docs.map(d => {
+      const data = d.data() as any;
+      let r = data.role || 'USER';
+      if (r === 'SUPER_ADMIN') r = 'ADMIN';
+      if (r === 'CONTENT_ADMIN' || r === 'UNIT_ADMIN') r = 'APPROVER';
+      return { id: d.id, ...data, role: r } as User;
+    });
+  },
+
+  getUserPersonalCloudData: async (userId: string) => {
+    try {
+      const [progSnap, subSnap, fbSnap, secSnap] = await Promise.all([
+        getDocs(query(collection(db, 'progress'), where('userId', '==', userId))),
+        getDocs(query(collection(db, 'exam_submissions'), where('userId', '==', userId))),
+        getDocs(query(collection(db, 'user_feedbacks'), where('userId', '==', userId))),
+        getDocs(query(collection(db, 'userSectionProgress'), where('userId', '==', userId)))
+      ]);
+
+      const progressList = progSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserProgress);
+      const examSubmissions = subSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as ExamSubmission)
+        .sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+      const feedbacks = fbSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserFeedback)
+        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      const sectionProgressList = secSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserSectionProgress);
+
+      return {
+        progressList,
+        examSubmissions,
+        feedbacks,
+        sectionProgressList
+      };
+    } catch (err) {
+      console.warn('[getUserPersonalCloudData error]:', err);
+      return { progressList: [], examSubmissions: [], feedbacks: [], sectionProgressList: [] };
+    }
+  },
+
+  updateUserAndSync: async (id: string, data: Partial<User>): Promise<User> => {
+    const docRef = doc(db, 'users', id);
+    const now = new Date().toISOString();
+
+    // Map role for Firestore security rules
+    const patch: any = { ...data };
+    if (patch.role) {
+      if (patch.role === 'ADMIN') patch.role = 'SUPER_ADMIN';
+      else if (patch.role === 'APPROVER') patch.role = 'CONTENT_ADMIN';
+    }
+    if (patch.fullName && !patch.name) {
+      patch.name = patch.fullName;
+    }
+
+    const updatePayload = sanitizeFirestoreData({ ...patch, updatedAt: now });
+    await updateDoc(docRef, updatePayload);
+
+    // Synchronize user profile changes to historical submissions and progress
+    try {
+      const displayName = data.fullName || data.name;
+      const rank = data.rank;
+      const position = data.position;
+      const unitName = data.unitName || data.unit;
+
+      if (displayName || rank || position || unitName) {
+        const [subSnap, progSnap] = await Promise.all([
+          getDocs(query(collection(db, 'exam_submissions'), where('userId', '==', id))),
+          getDocs(query(collection(db, 'progress'), where('userId', '==', id)))
+        ]);
+
+        if (!subSnap.empty || !progSnap.empty) {
+          const batch = writeBatch(db);
+          
+          subSnap.docs.forEach(d => {
+            const patch: any = {};
+            if (displayName) patch.userName = displayName;
+            if (rank) patch.userRank = rank;
+            if (position) patch.userPosition = position;
+            if (unitName) patch.unitName = unitName;
+            batch.update(d.ref, patch);
+          });
+
+          progSnap.docs.forEach(d => {
+            const patch: any = {};
+            if (displayName) patch.userName = displayName;
+            if (unitName) patch.unitName = unitName;
+            batch.update(d.ref, patch);
+          });
+
+          await batch.commit().catch(e => console.warn('[updateUserAndSync batch warning]:', e));
+        }
+      }
+    } catch (syncErr) {
+      console.warn('[updateUserAndSync profile sync warning]:', syncErr);
+    }
+
+    const updatedSnap = await getDoc(docRef);
+    const updatedData = updatedSnap.data() as any;
+    let r = updatedData.role || 'USER';
+    if (r === 'SUPER_ADMIN') r = 'ADMIN';
+    if (r === 'CONTENT_ADMIN' || r === 'UNIT_ADMIN') r = 'APPROVER';
+    return { id: updatedSnap.id, ...updatedData, role: r } as User;
   },
 
   // -------------------------------------------------------------
@@ -2282,27 +2388,86 @@ export const firestoreService = {
   },
 
   deleteUser: async (id: string): Promise<{ success: boolean }> => {
-    const userRef = doc(db, 'users', id);
-    const userSnap = await getDoc(userRef);
-    if (userSnap.exists()) {
-      const user = userSnap.data() as User;
-      if (user.avatar) {
-        await deleteUnifiedAssetHelper(user.avatar, 'image');
+    try {
+      const userRef = doc(db, 'users', id);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const user = userSnap.data() as User;
+        if (user.avatar) {
+          try {
+            await deleteUnifiedAssetHelper(user.avatar, 'image');
+          } catch (e) {
+            console.warn('Avatar deletion ignored:', e);
+          }
+        }
       }
+
+      // Delete the main user doc first
+      await deleteDoc(userRef);
+
+      // Clean up progress collections individually with try/catch to avoid batch dependency failures
+      try {
+        const progSnap = await getDocs(query(collection(db, 'progress'), where('userId', '==', id)));
+        if (!progSnap.empty) {
+          const batch = writeBatch(db);
+          progSnap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('Progress cleanup skipped or unauthorized:', err);
+      }
+
+      try {
+        const itemProgSnap = await getDocs(query(collection(db, 'itemProgress'), where('userId', '==', id)));
+        if (!itemProgSnap.empty) {
+          const batch = writeBatch(db);
+          itemProgSnap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('itemProgress cleanup skipped or unauthorized:', err);
+      }
+
+      try {
+        const secProgSnap = await getDocs(query(collection(db, 'userSectionProgress'), where('userId', '==', id)));
+        if (!secProgSnap.empty) {
+          const batch = writeBatch(db);
+          secProgSnap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('userSectionProgress cleanup skipped or unauthorized:', err);
+      }
+
+      // Also clean up exam submissions
+      try {
+        const subSnap = await getDocs(query(collection(db, 'exam_submissions'), where('userId', '==', id)));
+        if (!subSnap.empty) {
+          const batch = writeBatch(db);
+          subSnap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('exam_submissions cleanup skipped or unauthorized:', err);
+      }
+
+      // Also clean up user feedbacks
+      try {
+        const fbSnap = await getDocs(query(collection(db, 'user_feedbacks'), where('userId', '==', id)));
+        if (!fbSnap.empty) {
+          const batch = writeBatch(db);
+          fbSnap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('user_feedbacks cleanup skipped or unauthorized:', err);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[deleteUser error]:', err);
+      throw err;
     }
-    // Clean up user progress
-    const [progSnap, itemProgSnap, secProgSnap] = await Promise.all([
-      getDocs(query(collection(db, 'progress'), where('userId', '==', id))),
-      getDocs(query(collection(db, 'itemProgress'), where('userId', '==', id))),
-      getDocs(query(collection(db, 'userSectionProgress'), where('userId', '==', id)))
-    ]);
-    const batch = writeBatch(db);
-    batch.delete(userRef);
-    progSnap.docs.forEach(d => batch.delete(d.ref));
-    itemProgSnap.docs.forEach(d => batch.delete(d.ref));
-    secProgSnap.docs.forEach(d => batch.delete(d.ref));
-    await batch.commit().catch(() => {});
-    return { success: true };
   },
 
   scanOrphanRecords: async () => {
@@ -2440,6 +2605,9 @@ export const firestoreService = {
       const snap = await getDoc(doc(db, 'exam_banks', id));
       if (!snap.exists()) return null;
       const bank = snap.data() as ExamBank;
+      if (bank.questions && bank.questions.length > 0) {
+        return bank;
+      }
       const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', id)));
       const questions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
       return { ...bank, questions };
@@ -2449,15 +2617,39 @@ export const firestoreService = {
     }
   },
 
+  listenExamBanks: (callback: (banks: ExamBank[]) => void) => {
+    try {
+      const colRef = collection(db, 'exam_banks');
+      return onSnapshot(colRef, (snapshot) => {
+        const banks = snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExamBank);
+        banks.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        callback(banks);
+      }, (err) => {
+        console.warn('[listenExamBanks warning]:', err);
+      });
+    } catch (err) {
+      console.warn('[listenExamBanks error]:', err);
+      return () => {};
+    }
+  },
+
   createExamBank: async (data: Partial<ExamBank>, questions: ExamQuestion[]): Promise<ExamBank> => {
     const id = data.id || `bank-${Date.now()}`;
     const now = new Date().toISOString();
+    const preparedQuestions = questions.map((q, idx) => ({
+      ...q,
+      id: q.id || `${id}-q${idx + 1}`,
+      bankId: id,
+      stt: idx + 1
+    }));
+
     const bank: ExamBank = {
       id,
       title: data.title || 'Bộ đề trắc nghiệm mới',
       description: data.description || '',
       courseId: data.courseId || '',
-      totalQuestions: questions.length,
+      totalQuestions: preparedQuestions.length,
+      questions: preparedQuestions,
       createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
       createdAt: now,
       updatedAt: now
@@ -2466,16 +2658,8 @@ export const firestoreService = {
     const batch = writeBatch(db);
     batch.set(doc(db, 'exam_banks', id), bank);
 
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      const qId = q.id || `${id}-q${i + 1}`;
-      const qDoc: ExamQuestion = {
-        ...q,
-        id: qId,
-        bankId: id,
-        stt: i + 1
-      };
-      batch.set(doc(db, 'exam_questions', qId), qDoc);
+    for (const qDoc of preparedQuestions) {
+      batch.set(doc(db, 'exam_questions', qDoc.id), qDoc);
     }
 
     await batch.commit();
@@ -2489,6 +2673,84 @@ export const firestoreService = {
     qSnap.docs.forEach(d => batch.delete(d.ref));
     await batch.commit();
     return { success: true };
+  },
+
+  // Propagate updated bank questions to all active exam sessions linked to this bank
+  propagateBankQuestionsToSessions: async (bankId: string, questions: ExamQuestion[]): Promise<number> => {
+    try {
+      const qSnap = await getDocs(query(collection(db, 'exam_sessions'), where('bankId', '==', bankId)));
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      qSnap.docs.forEach(d => {
+        batch.update(d.ref, {
+          questions,
+          totalQuestions: questions.length,
+          pushedToAppAt: now,
+          updatedAt: now
+        });
+      });
+      await batch.commit();
+      return qSnap.docs.length;
+    } catch (err) {
+      console.warn('[propagateBankQuestionsToSessions error]:', err);
+      return 0;
+    }
+  },
+
+  updateExamQuestionInBank: async (bankId: string, questionId: string, updatedFields: Partial<ExamQuestion>): Promise<ExamQuestion[]> => {
+    const qDocRef = doc(db, 'exam_questions', questionId);
+    await updateDoc(qDocRef, updatedFields);
+
+    const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', bankId)));
+    const allQuestions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
+
+    const bankRef = doc(db, 'exam_banks', bankId);
+    const now = new Date().toISOString();
+    await updateDoc(bankRef, {
+      questions: allQuestions,
+      totalQuestions: allQuestions.length,
+      updatedAt: now
+    });
+
+    await firestoreService.propagateBankQuestionsToSessions(bankId, allQuestions);
+    return allQuestions;
+  },
+
+  deleteExamQuestionFromBank: async (bankId: string, questionId: string): Promise<ExamQuestion[]> => {
+    await deleteDoc(doc(db, 'exam_questions', questionId));
+
+    const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', bankId)));
+    let allQuestions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
+
+    const batch = writeBatch(db);
+    allQuestions = allQuestions.map((q, idx) => {
+      const updated = { ...q, stt: idx + 1 };
+      batch.update(doc(db, 'exam_questions', q.id), { stt: idx + 1 });
+      return updated;
+    });
+
+    const now = new Date().toISOString();
+    batch.update(doc(db, 'exam_banks', bankId), {
+      questions: allQuestions,
+      totalQuestions: allQuestions.length,
+      updatedAt: now
+    });
+
+    await batch.commit();
+    await firestoreService.propagateBankQuestionsToSessions(bankId, allQuestions);
+    return allQuestions;
+  },
+
+  pickRandomQuestions: (sourceQuestions: ExamQuestion[], targetCount: number): ExamQuestion[] => {
+    if (!sourceQuestions || sourceQuestions.length === 0) return [];
+    const reqCount = Number(targetCount);
+    if (isNaN(reqCount) || reqCount <= 0 || reqCount >= sourceQuestions.length) {
+      return sourceQuestions.map((q, idx) => ({ ...q, stt: idx + 1 }));
+    }
+    // Shuffle array randomly
+    const shuffled = [...sourceQuestions].sort(() => Math.random() - 0.5);
+    const selected = shuffled.slice(0, reqCount);
+    return selected.map((q, idx) => ({ ...q, stt: idx + 1 }));
   },
 
   // -------------------------------------------------------------
@@ -2540,25 +2802,47 @@ export const firestoreService = {
   createExamSession: async (data: Partial<ExamSession>): Promise<ExamSession> => {
     const id = data.id || `session-${Date.now()}`;
     const now = new Date().toISOString();
+    let questions: ExamQuestion[] = data.questions || [];
+
+    if (questions.length === 0 && data.bankId) {
+      try {
+        const bankSnap = await getDoc(doc(db, 'exam_banks', data.bankId));
+        if (bankSnap.exists() && bankSnap.data()?.questions?.length > 0) {
+          questions = bankSnap.data().questions;
+        } else {
+          const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', data.bankId)));
+          questions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
+        }
+      } catch (err) {
+        console.warn('[createExamSession] Could not auto-fetch bank questions:', err);
+      }
+    }
+
+    const reqTotal = Number(data.totalQuestions) || questions.length || 20;
+    const selectedQuestions = firestoreService.pickRandomQuestions(questions, reqTotal);
+
     const session: ExamSession = {
       id,
       title: data.title || 'Đợt kiểm tra mới',
       description: data.description || '',
       bankId: data.bankId || '',
       bankTitle: data.bankTitle || '',
-      durationMinutes: data.durationMinutes || 20,
-      passScore: data.passScore || 5.0,
-      totalQuestions: data.totalQuestions || 10,
+      durationMinutes: Number(data.durationMinutes) || 20,
+      passScore: Number(data.passScore) || 5.0,
+      totalQuestions: selectedQuestions.length,
+      questions: selectedQuestions,
       targetUnit: data.targetUnit || 'ALL',
       status: data.status || 'ACTIVE',
+      pushedToAppAt: now,
       startTime: data.startTime || now,
       endTime: data.endTime || '',
       createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
       createdAt: now,
       updatedAt: now
     };
-    await setDoc(doc(db, 'exam_sessions', id), session);
-    // Ensure flag is set
+
+    const cleanSession = sanitizeFirestoreData(session);
+    await setDoc(doc(db, 'exam_sessions', id), cleanSession);
     await setDoc(doc(db, 'system_meta', 'init_flags'), { examSessionsSeeded: true }, { merge: true });
     return session;
   },
@@ -2566,14 +2850,75 @@ export const firestoreService = {
   updateExamSession: async (id: string, data: Partial<ExamSession>): Promise<ExamSession> => {
     const docRef = doc(db, 'exam_sessions', id);
     const existing = await getDoc(docRef);
-    if (!existing.exists()) throw new Error(`Không tìm thấy đợt kiểm tra ${id}`);
+    const existingData = existing.exists() ? (existing.data() as ExamSession) : ({} as ExamSession);
     const now = new Date().toISOString();
-    const updatePayload = {
+
+    let poolQuestions: ExamQuestion[] = data.questions || [];
+    const targetBankId = data.bankId || existingData.bankId;
+
+    if (targetBankId) {
+      try {
+        const bankSnap = await getDoc(doc(db, 'exam_banks', targetBankId));
+        if (bankSnap.exists() && bankSnap.data()?.questions?.length > 0) {
+          poolQuestions = bankSnap.data().questions;
+        } else {
+          const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', targetBankId)));
+          const fetched = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
+          if (fetched.length > 0) poolQuestions = fetched;
+        }
+      } catch (err) {
+        console.warn('[updateExamSession] Could not auto-fetch bank questions:', err);
+      }
+    }
+
+    if (poolQuestions.length === 0 && existingData.questions) {
+      poolQuestions = existingData.questions;
+    }
+
+    const reqTotal = Number(data.totalQuestions) || Number(existingData.totalQuestions) || poolQuestions.length || 20;
+    const selectedQuestions = firestoreService.pickRandomQuestions(poolQuestions, reqTotal);
+
+    const mergedPayload: ExamSession = {
+      ...existingData,
       ...data,
+      id,
+      questions: selectedQuestions,
+      totalQuestions: selectedQuestions.length,
+      pushedToAppAt: now,
       updatedAt: now
     };
+
+    const cleanPayload = sanitizeFirestoreData(mergedPayload);
+    await setDoc(docRef, cleanPayload, { merge: true });
+    return mergedPayload;
+  },
+
+  syncSessionBankQuestions: async (sessionId: string): Promise<{ session: ExamSession; syncedQuestionCount: number }> => {
+    const docRef = doc(db, 'exam_sessions', sessionId);
+    const existing = await getDoc(docRef);
+    if (!existing.exists()) throw new Error(`Không tìm thấy đợt kiểm tra ${sessionId}`);
+    const sessionData = existing.data() as ExamSession;
+
+    let questions: ExamQuestion[] = sessionData.questions || [];
+    if (sessionData.bankId) {
+      const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', sessionData.bankId)));
+      questions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
+    }
+
+    const now = new Date().toISOString();
+    const updatePayload = {
+      questions,
+      totalQuestions: questions.length > 0 ? questions.length : sessionData.totalQuestions,
+      status: 'ACTIVE' as const,
+      pushedToAppAt: now,
+      updatedAt: now
+    };
+
     await updateDoc(docRef, updatePayload);
-    return { ...(existing.data() as ExamSession), ...updatePayload };
+    return {
+      session: { ...sessionData, ...updatePayload },
+      syncedQuestionCount: questions.length
+    };
   },
 
   deleteExamSession: async (id: string): Promise<{ success: boolean }> => {
@@ -2632,10 +2977,32 @@ export const firestoreService = {
   },
 
   // -------------------------------------------------------------
-  // EXAM SUBMISSIONS (NỘP BÀI THI & TỔNG HỢP KẾT QUẢ)
+  // EXAM SUBMISSIONS (NỘP BÀI THI & TỔNG HỢP KẾT QUẢ THỰC TẾ)
   // -------------------------------------------------------------
+  cleanSampleSubmissionsIfNeeded: async (): Promise<void> => {
+    try {
+      const colRef = collection(db, 'exam_submissions');
+      const snap = await getDocs(colRef);
+      const sampleDocs = snap.docs.filter(d => 
+        d.id.startsWith('sub-init-') || 
+        d.id.startsWith('sub-sample-') || 
+        d.id.startsWith('sub-seed-')
+      );
+      if (sampleDocs.length > 0) {
+        const batch = writeBatch(db);
+        sampleDocs.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      }
+    } catch (err) {
+      console.warn('[cleanSampleSubmissionsIfNeeded warning]:', err);
+    }
+  },
+
   getExamSubmissions: async (sessionId?: string): Promise<ExamSubmission[]> => {
     try {
+      // Clean up legacy sample submissions to ensure only real submissions are used
+      await firestoreService.cleanSampleSubmissionsIfNeeded().catch(() => {});
+
       const colRef = collection(db, 'exam_submissions');
       let q;
       if (sessionId && sessionId !== 'ALL') {
@@ -2645,16 +3012,38 @@ export const firestoreService = {
       }
       const snap = await getDocs(q);
 
-      // Clean up any legacy sample documents if present
-      const sampleDocs = snap.docs.filter(d => d.id.startsWith('sub-sample-'));
-      if (sampleDocs.length > 0) {
-        const batch = writeBatch(db);
-        sampleDocs.forEach(d => batch.delete(d.ref));
-        await batch.commit().catch(() => {});
+      // Filter out any lingering sample docs
+      const realDocs = snap.docs.filter(d => 
+        !d.id.startsWith('sub-init-') && 
+        !d.id.startsWith('sub-sample-') && 
+        !d.id.startsWith('sub-seed-')
+      );
+
+      // Fetch registered users from Firestore to dynamically enrich submission records
+      const userSnap = await getDocs(collection(db, 'users')).catch(() => null);
+      const userMap = new Map<string, User>();
+      if (userSnap) {
+        userSnap.docs.forEach(d => {
+          const u = { ...(d.data() as any), id: d.id } as User;
+          userMap.set(u.id, u);
+          if (u.fullName) userMap.set(u.fullName, u);
+          if (u.name) userMap.set(u.name, u);
+        });
       }
 
-      const realDocs = snap.docs.filter(d => !d.id.startsWith('sub-sample-'));
-      const subs = realDocs.map(d => ({ ...d.data(), id: d.id }) as ExamSubmission);
+      const subs = realDocs.map(d => {
+        const data = d.data() as ExamSubmission;
+        const matchedUser = userMap.get(data.userId) || userMap.get(data.userName);
+        return {
+          ...data,
+          id: d.id,
+          userName: matchedUser?.fullName || matchedUser?.name || data.userName,
+          userRank: matchedUser?.rank || data.userRank,
+          userPosition: matchedUser?.position || data.userPosition,
+          unitName: matchedUser?.unitName || matchedUser?.unit || data.unitName,
+        } as ExamSubmission;
+      });
+
       return subs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
     } catch (err) {
       console.warn('[getExamSubmissions error]:', err);
@@ -2670,15 +3059,35 @@ export const firestoreService = {
     const numTotal = Number(submission.totalQuestions ?? 0);
     const isPassed = submission.passed ?? (numScore >= 5.0);
 
+    let uName = submission.userName || 'Thí sinh dự thi';
+    let uRank = submission.userRank || 'Quân nhân';
+    let uPos = submission.userPosition || 'Cán bộ / Chiến sĩ';
+    let uUnit = submission.unitName || 'Vùng 4 Hải Quân';
+
+    if (submission.userId) {
+      try {
+        const uSnap = await getDoc(doc(db, 'users', submission.userId));
+        if (uSnap.exists()) {
+          const uData = uSnap.data() as User;
+          uName = uData.fullName || uData.name || uName;
+          uRank = uData.rank || uRank;
+          uPos = uData.position || uPos;
+          uUnit = uData.unitName || uData.unit || uUnit;
+        }
+      } catch (err) {
+        console.warn('[submitExamResult] error fetching user doc:', err);
+      }
+    }
+
     const fullSubmission: ExamSubmission = {
       id,
       sessionId: submission.sessionId || '',
       sessionTitle: submission.sessionTitle || 'Kiểm tra nhận thức',
       userId: submission.userId || 'user-anon',
-      userName: submission.userName || 'Thí sinh dự thi',
-      userRank: submission.userRank || 'Quân nhân',
-      userPosition: submission.userPosition || 'Cán bộ / Chiến sĩ',
-      unitName: submission.unitName || 'Vùng 4 Hải Quân',
+      userName: uName,
+      userRank: uRank,
+      userPosition: uPos,
+      unitName: uUnit,
       score: numScore,
       correctCount: numCorrect,
       totalQuestions: numTotal,
@@ -2688,9 +3097,8 @@ export const firestoreService = {
       submittedAt: submission.submittedAt || now
     };
 
-    // Save submission to Firestore
-    await setDoc(doc(db, 'exam_submissions', id), fullSubmission);
-    // Ensure flag is set
+    const cleanSubmission = sanitizeFirestoreData(fullSubmission);
+    await setDoc(doc(db, 'exam_submissions', id), cleanSubmission);
     await setDoc(doc(db, 'system_meta', 'init_flags'), { examSubmissionsSeeded: true }, { merge: true });
     return fullSubmission;
   },
@@ -2703,9 +3111,39 @@ export const firestoreService = {
     } else {
       q = query(colRef);
     }
-    return onSnapshot(q, (snapshot) => {
-      const realDocs = snapshot.docs.filter(d => !d.id.startsWith('sub-sample-'));
-      const subs = realDocs.map(d => ({ ...d.data(), id: d.id }) as ExamSubmission);
+    return onSnapshot(q, async (snapshot) => {
+      let userMap = new Map<string, User>();
+      try {
+        const userSnap = await getDocs(collection(db, 'users'));
+        userSnap.docs.forEach(d => {
+          const u = { ...(d.data() as any), id: d.id } as User;
+          userMap.set(u.id, u);
+          if (u.fullName) userMap.set(u.fullName, u);
+          if (u.name) userMap.set(u.name, u);
+        });
+      } catch (e) {
+        console.warn('[listenExamSubmissions] user fetch warning:', e);
+      }
+
+      const realDocs = snapshot.docs.filter(d => 
+        !d.id.startsWith('sub-init-') && 
+        !d.id.startsWith('sub-sample-') && 
+        !d.id.startsWith('sub-seed-')
+      );
+
+      const subs = realDocs.map(d => {
+        const data = d.data() as ExamSubmission;
+        const matchedUser = userMap.get(data.userId) || userMap.get(data.userName);
+        return {
+          ...data,
+          id: d.id,
+          userName: matchedUser?.fullName || matchedUser?.name || data.userName,
+          userRank: matchedUser?.rank || data.userRank,
+          userPosition: matchedUser?.position || data.userPosition,
+          unitName: matchedUser?.unitName || matchedUser?.unit || data.unitName,
+        } as ExamSubmission;
+      });
+
       subs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
       callback(subs);
     }, (err) => {

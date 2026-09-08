@@ -948,13 +948,18 @@ export const api = {
     const rankAndPos = data.rankAndPosition || (data.rank && data.position ? `${data.rank} - ${data.position}` : data.rank || data.position || 'Chiến sĩ Hải Quân');
     const unitName = data.unit || data.unitName || 'Bộ Tư lệnh Vùng 4 Hải Quân';
 
-    const user: User = {
+    // Map role for Firestore security rules
+    let firestoreRole: string = data.role || 'USER';
+    if (firestoreRole === 'ADMIN') firestoreRole = 'SUPER_ADMIN';
+    if (firestoreRole === 'APPROVER') firestoreRole = 'CONTENT_ADMIN';
+
+    const user: any = {
       id,
       name: displayName,
       fullName: displayName,
       email: data.email || 'quan.nhan@vung4.vn',
       password: data.password || '123@abc',
-      role: data.role || 'USER',
+      role: firestoreRole,
       rank: data.rank || 'Đại úy',
       position: data.position || 'Trợ lý',
       rankAndPosition: rankAndPos,
@@ -966,14 +971,15 @@ export const api = {
       updatedAt: now
     };
     await setDoc(docRef, user);
-    return user;
+    return { ...user, role: data.role || 'USER' };
   },
 
   updateUser: async (id: string, data: Partial<User>): Promise<User> => {
-    const docRef = doc(db, 'users', id);
-    await updateDoc(docRef, { ...data, updatedAt: new Date().toISOString() });
-    const snap = await getDoc(docRef);
-    return snap.data() as User;
+    return await firestoreService.updateUserAndSync(id, data);
+  },
+
+  getUserPersonalCloudData: async (userId: string) => {
+    return await firestoreService.getUserPersonalCloudData(userId);
   },
 
   deleteUser: async (id: string): Promise<{ success: boolean }> => {
@@ -1283,12 +1289,28 @@ export const api = {
     return await firestoreService.getExamBank(id);
   },
 
+  listenExamBanks: (callback: (banks: ExamBank[]) => void) => {
+    return firestoreService.listenExamBanks(callback);
+  },
+
   createExamBank: async (data: Partial<ExamBank>, questions: ExamQuestion[]): Promise<ExamBank> => {
     return await firestoreService.createExamBank(data, questions);
   },
 
   deleteExamBank: async (id: string): Promise<{ success: boolean }> => {
     return await firestoreService.deleteExamBank(id);
+  },
+
+  updateExamQuestionInBank: async (bankId: string, questionId: string, updatedFields: Partial<ExamQuestion>): Promise<ExamQuestion[]> => {
+    return await firestoreService.updateExamQuestionInBank(bankId, questionId, updatedFields);
+  },
+
+  deleteExamQuestionFromBank: async (bankId: string, questionId: string): Promise<ExamQuestion[]> => {
+    return await firestoreService.deleteExamQuestionFromBank(bankId, questionId);
+  },
+
+  pickRandomQuestions: (sourceQuestions: ExamQuestion[], targetCount: number): ExamQuestion[] => {
+    return firestoreService.pickRandomQuestions(sourceQuestions, targetCount);
   },
 
   getExamSessions: async (): Promise<ExamSession[]> => {
@@ -1301,6 +1323,10 @@ export const api = {
 
   updateExamSession: async (id: string, data: Partial<ExamSession>): Promise<ExamSession> => {
     return await firestoreService.updateExamSession(id, data);
+  },
+
+  syncSessionBankQuestions: async (sessionId: string): Promise<{ session: ExamSession; syncedQuestionCount: number }> => {
+    return await firestoreService.syncSessionBankQuestions(sessionId);
   },
 
   deleteExamSession: async (id: string): Promise<{ success: boolean }> => {

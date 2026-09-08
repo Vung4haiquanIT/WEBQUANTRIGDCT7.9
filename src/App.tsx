@@ -208,18 +208,33 @@ export function App() {
   // User CRUD Handlers
   // -------------------------------------------------------------
   const handleCreateUser = async (data: Partial<User>) => {
-    await api.createUser(data);
-    await fetchAllData();
+    try {
+      await api.createUser(data);
+      await fetchAllData();
+    } catch (err: any) {
+      console.error('Lỗi tạo người dùng:', err);
+      alert('Lỗi tạo người dùng: ' + (err.message || err));
+    }
   };
 
   const handleUpdateUser = async (id: string, data: Partial<User>) => {
-    await api.updateUser(id, data);
-    await fetchAllData();
+    try {
+      await api.updateUser(id, data);
+      await fetchAllData();
+    } catch (err: any) {
+      console.error('Lỗi cập nhật người dùng:', err);
+      alert('Lỗi cập nhật người dùng: ' + (err.message || err));
+    }
   };
 
   const handleDeleteUser = async (id: string) => {
-    await api.deleteUser(id);
-    await fetchAllData();
+    try {
+      await api.deleteUser(id);
+      await fetchAllData();
+    } catch (err: any) {
+      console.error('Lỗi xóa người dùng:', err);
+      alert('Lỗi xóa người dùng: ' + (err.message || err));
+    }
   };
 
   // -------------------------------------------------------------
@@ -345,7 +360,7 @@ export function App() {
               onDeleteLesson={handleDeleteLesson}
             />
           ) : currentView === 'exams' ? (
-            <ExamsView currentUser={adminUser} units={units} />
+            <ExamsView currentUser={adminUser} units={units} users={users} progressList={progressList} />
           ) : currentView === 'feedbacks' ? (
             <FeedbacksView currentUser={adminUser} units={units} />
           ) : currentView === 'users' ? (

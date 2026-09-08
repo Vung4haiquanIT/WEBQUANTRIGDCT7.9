@@ -5,7 +5,7 @@ import {
   Users, Layers, ArrowRight, AlertCircle, FileText, Check, X, Smartphone, BarChart3,
   Edit3, TrendingUp, Medal, ChevronRight
 } from 'lucide-react';
-import { ExamBank, ExamQuestion, ExamSession, ExamSubmission, Unit } from '../types';
+import { ExamBank, ExamQuestion, ExamSession, ExamSubmission, Unit, User, UserProgress } from '../types';
 import { api } from '../services/api';
 import { parseExamQuestionsFromExcel, downloadSampleExamExcelTemplate, ParsedExamExcelResult } from '../utils/excelExamParser';
 import * as XLSX from 'xlsx';
@@ -13,9 +13,11 @@ import * as XLSX from 'xlsx';
 interface ExamsViewProps {
   currentUser?: any;
   units?: Unit[];
+  users?: User[];
+  progressList?: UserProgress[];
 }
 
-export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] }) => {
+export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], users = [], progressList = [] }) => {
   const [activeTab, setActiveTab] = useState<'sessions' | 'banks' | 'reports'>('sessions');
 
   // Core Data States
@@ -34,7 +36,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<ExamSession | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<ExamSession | null>(null);
-  const [reportViewMode, setReportViewMode] = useState<'unit' | 'candidate'>('unit');
+  const [reportViewMode, setReportViewMode] = useState<'unit' | 'candidate' | 'account'>('unit');
   const [selectedBankForDetail, setSelectedBankForDetail] = useState<ExamBank | null>(null);
   const [selectedSessionForReport, setSelectedSessionForReport] = useState<ExamSession | null>(null);
   const [selectedSubmissionForDetail, setSelectedSubmissionForDetail] = useState<ExamSubmission | null>(null);
@@ -53,6 +55,121 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
   const [newBankTitle, setNewBankTitle] = useState<string>('');
   const [newBankDescription, setNewBankDescription] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [isSyncingSessionId, setIsSyncingSessionId] = useState<string | null>(null);
+
+  // Question Edit State inside a Question Bank
+  const [editingQuestion, setEditingQuestion] = useState<ExamQuestion | null>(null);
+  const [editingQuestionForm, setEditingQuestionForm] = useState<{
+    question: string;
+    options: string[];
+    correctOptionIndex: number;
+    explanation: string;
+  }>({
+    question: '',
+    options: ['', '', '', ''],
+    correctOptionIndex: 0,
+    explanation: ''
+  });
+  const [isSavingQuestion, setIsSavingQuestion] = useState<boolean>(false);
+
+  // Open Edit Question Modal
+  const handleOpenEditQuestion = (q: ExamQuestion) => {
+    setEditingQuestion(q);
+    setEditingQuestionForm({
+      question: q.question || '',
+      options: q.options && q.options.length >= 4 ? [...q.options] : [(q.options?.[0] || ''), (q.options?.[1] || ''), (q.options?.[2] || ''), (q.options?.[3] || '')],
+      correctOptionIndex: typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : 0,
+      explanation: q.explanation || ''
+    });
+  };
+
+  // Save Edited Question & Auto Sync Live to App
+  const handleSaveEditedQuestionSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingQuestion || !selectedBankForDetail) return;
+    if (!editingQuestionForm.question.trim()) {
+      alert('Vui lòng nhập nội dung câu hỏi');
+      return;
+    }
+    setIsSavingQuestion(true);
+    try {
+      const updatedQuestions = await api.updateExamQuestionInBank(
+        selectedBankForDetail.id,
+        editingQuestion.id,
+        {
+          question: editingQuestionForm.question.trim(),
+          options: editingQuestionForm.options.map(o => o.trim()),
+          correctOptionIndex: Number(editingQuestionForm.correctOptionIndex) || 0,
+          explanation: editingQuestionForm.explanation.trim()
+        }
+      );
+
+      // Update local state
+      const updatedBank = {
+        ...selectedBankForDetail,
+        questions: updatedQuestions,
+        totalQuestions: updatedQuestions.length
+      };
+      setSelectedBankForDetail(updatedBank);
+      setEditingQuestion(null);
+      await loadAllData();
+      alert('Đã cập nhật chỉnh sửa câu hỏi và tự động đồng bộ tức thì lên Cloud App cho tất cả tài khoản di động!');
+    } catch (err: any) {
+      alert(`Lỗi cập nhật câu hỏi: ${err.message}`);
+    } finally {
+      setIsSavingQuestion(false);
+    }
+  };
+
+  // Delete Question From Bank
+  const handleDeleteQuestionFromBank = async (qId: string) => {
+    if (!selectedBankForDetail) return;
+    if (!confirm('Bạn có chắc chắn muốn xóa câu hỏi này khỏi bộ đề? Sau khi xóa, dữ liệu trên App di động sẽ cập nhật lập tức.')) return;
+    try {
+      const updatedQuestions = await api.deleteExamQuestionFromBank(selectedBankForDetail.id, qId);
+      setSelectedBankForDetail({
+        ...selectedBankForDetail,
+        questions: updatedQuestions,
+        totalQuestions: updatedQuestions.length
+      });
+      await loadAllData();
+      alert('Đã xóa câu hỏi và cập nhật dữ liệu bộ đề lên Cloud App di động!');
+    } catch (err: any) {
+      alert(`Lỗi xóa câu hỏi: ${err.message}`);
+    }
+  };
+
+  // Push Exam Session & Question Bank live to Mobile App accounts
+  const handlePushBankToApp = async (session: ExamSession) => {
+    setIsSyncingSessionId(session.id);
+    try {
+      const result = await api.syncSessionBankQuestions(session.id);
+      await loadAllData();
+      alert(
+        `Đã đẩy thành công ${result.syncedQuestionCount} câu hỏi từ Ngân hàng đề lên Cloud App cho đợt kiểm tra "${session.title}"!\n\nTất cả các tài khoản người dùng/quân nhân trên App di động đã có thể truy cập làm bài.`
+      );
+    } catch (err: any) {
+      alert(`Lỗi khi đẩy bộ đề lên App: ${err?.message || 'Không thể kết nối'}`);
+    } finally {
+      setIsSyncingSessionId(null);
+    }
+  };
+
+  // Helper to open session modal pre-selected from a Question Bank
+  const handleCreateSessionFromBank = (bank: ExamBank) => {
+    setEditingSession(null);
+    setSessionFormData({
+      title: `Đợt kiểm tra: ${bank.title}`,
+      description: `Kiểm tra đánh giá chất lượng từ bộ đề ${bank.title} (${bank.totalQuestions} câu hỏi)`,
+      bankId: bank.id,
+      durationMinutes: 20,
+      passScore: 5.0,
+      totalQuestions: bank.totalQuestions || 20,
+      targetUnit: 'ALL',
+      status: 'ACTIVE'
+    });
+    setIsNewSessionModalOpen(true);
+  };
 
   // New Exam Session Form State
   const [sessionFormData, setSessionFormData] = useState({
@@ -75,6 +192,11 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
       setSessions(updatedSessions);
     });
 
+    // Realtime listener for exam question banks
+    const unsubBanks = api.listenExamBanks((updatedBanks) => {
+      setBanks(updatedBanks);
+    });
+
     // Realtime listener for all candidate exam submissions (instant sync across accounts)
     const unsubSubmissions = api.listenExamSubmissions(undefined, (updatedSubmissions) => {
       setSubmissions(updatedSubmissions);
@@ -82,6 +204,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
 
     return () => {
       if (unsubSessions) unsubSessions();
+      if (unsubBanks) unsubBanks();
       if (unsubSubmissions) unsubSubmissions();
     };
   }, []);
@@ -206,7 +329,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
   const handleSaveSessionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sessionFormData.title.trim()) {
-      alert('Vui lòng nhập tiêu đề đợt kiểm tra');
+      alert('Vui lòng nhập tên Đợt kiểm tra');
       return;
     }
     if (!sessionFormData.bankId) {
@@ -215,36 +338,53 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
     }
 
     const selectedBank = banks.find(b => b.id === sessionFormData.bankId);
-    const configuredQuestions = Number(sessionFormData.totalQuestions) || selectedBank?.totalQuestions || 20;
 
     try {
+      let bankQuestions: ExamQuestion[] = [];
+      const fullBank = await api.getExamBank(sessionFormData.bankId);
+      if (fullBank?.questions && fullBank.questions.length > 0) {
+        bankQuestions = fullBank.questions;
+      } else if (selectedBank?.questions && selectedBank.questions.length > 0) {
+        bankQuestions = selectedBank.questions;
+      }
+
+      const requestedCount = Number(sessionFormData.totalQuestions) || 20;
+      const pool = bankQuestions.length > 0 ? bankQuestions : (editingSession?.questions || []);
+      const selectedQuestions = api.pickRandomQuestions(pool, requestedCount);
+
       if (editingSession) {
-        await api.updateExamSession(editingSession.id, {
+        const updated = await api.updateExamSession(editingSession.id, {
           title: sessionFormData.title.trim(),
           description: sessionFormData.description.trim(),
           bankId: sessionFormData.bankId,
-          bankTitle: selectedBank?.title || 'Bộ đề kiểm tra',
+          bankTitle: selectedBank?.title || editingSession.bankTitle || 'Bộ đề kiểm tra',
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
-          totalQuestions: configuredQuestions,
+          totalQuestions: selectedQuestions.length,
+          questions: selectedQuestions,
           targetUnit: sessionFormData.targetUnit,
           status: sessionFormData.status,
         });
-        alert(`Đã cập nhật thành công đợt kiểm tra "${sessionFormData.title.trim()}"!`);
+
+        setSessions(prev => prev.map(s => s.id === editingSession.id ? updated : s));
+        alert(`Đã lưu thay đổi đợt kiểm tra "${updated.title}"! Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       } else {
-        await api.createExamSession({
+        const created = await api.createExamSession({
           title: sessionFormData.title.trim(),
           description: sessionFormData.description.trim(),
           bankId: sessionFormData.bankId,
           bankTitle: selectedBank?.title || 'Bộ đề kiểm tra',
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
-          totalQuestions: configuredQuestions,
+          totalQuestions: selectedQuestions.length,
+          questions: selectedQuestions,
           targetUnit: sessionFormData.targetUnit,
           status: sessionFormData.status,
           createdBy: currentUser?.name || 'Phòng Chính trị Vùng 4'
         });
-        alert('Đã khởi tạo thành công Đợt kiểm tra mới!');
+
+        setSessions(prev => [created, ...prev.filter(s => s.id !== created.id)]);
+        alert(`Đã khởi tạo đợt kiểm tra mới "${created.title}"! Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       }
 
       setIsNewSessionModalOpen(false);
@@ -259,9 +399,10 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
         targetUnit: 'ALL',
         status: 'ACTIVE'
       });
-      loadAllData();
+      await loadAllData();
     } catch (err: any) {
-      alert(`Lỗi lưu đợt kiểm tra: ${err.message}`);
+      console.error('Lỗi lưu đợt kiểm tra:', err);
+      alert(`Lỗi lưu đợt kiểm tra: ${err.message || 'Không thể lưu thay đổi'}`);
     }
   };
 
@@ -309,17 +450,22 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
 
   // Start Mobile App Test Simulator
   const handleStartTestSimulator = async (session: ExamSession) => {
-    const bank = await api.getExamBank(session.bankId);
-    if (!bank || !bank.questions || bank.questions.length === 0) {
-      alert('Bộ đề của đợt kiểm tra này hiện chưa có câu hỏi!');
+    let questionsForTest: ExamQuestion[] = session.questions || [];
+    if (!questionsForTest || questionsForTest.length === 0) {
+      const bank = await api.getExamBank(session.bankId);
+      questionsForTest = bank?.questions || [];
+    }
+
+    if (!questionsForTest || questionsForTest.length === 0) {
+      alert('Bộ đề của đợt kiểm tra này hiện chưa có câu hỏi! Vui lòng bấm nút "Đẩy Bộ Đề Lên App" để đồng bộ câu hỏi từ ngân hàng đề.');
       return;
     }
 
-    const targetCount = session.totalQuestions || bank.totalQuestions || bank.questions.length;
-    const questionsForTest = bank.questions.slice(0, targetCount);
+    const targetCount = session.totalQuestions || questionsForTest.length;
+    const finalQuestions = questionsForTest.slice(0, targetCount);
 
     setActiveSimulatorSession(session);
-    setSimulatorQuestions(questionsForTest);
+    setSimulatorQuestions(finalQuestions);
     setUserAnswers({});
     setTimeLeftSeconds((session.durationMinutes || 20) * 60);
     setTestResultSummary(null);
@@ -400,7 +546,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
   const filteredReportSubmissions = useMemo(() => {
     return submissions.filter(s => {
       const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
-      const matchUnit = selectedUnitFilter === 'ALL' || !selectedUnitFilter || s.unitName === selectedUnitFilter;
+      const matchUnit = selectedUnitFilter === 'ALL' || !selectedUnitFilter || s.unitName === selectedUnitFilter || (s.unitName && selectedUnitFilter && s.unitName.toLowerCase().includes(selectedUnitFilter.toLowerCase()));
       const matchSearch = !searchCandidateQuery.trim() || 
         (s.userName || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
         (s.unitName || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
@@ -426,6 +572,27 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
       poorCount: number;      // < 5.0
     }> = {};
 
+    // Pre-populate units from unit list if available
+    if (units && units.length > 0) {
+      units.forEach(u => {
+        if (u.name) {
+          map[u.name] = {
+            unitName: u.name,
+            total: 0,
+            passed: 0,
+            failed: 0,
+            sumScore: 0,
+            maxScore: 0,
+            minScore: 10,
+            excellentCount: 0,
+            goodCount: 0,
+            averageCount: 0,
+            poorCount: 0
+          };
+        }
+      });
+    }
+
     filteredReportSubmissions.forEach(s => {
       const uName = s.unitName || 'Chưa phân đơn vị';
       if (!map[uName]) {
@@ -446,7 +613,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
       const stat = map[uName];
       stat.total += 1;
       if (s.passed) stat.passed += 1; else stat.failed += 1;
-      stat.sumScore += s.score;
+      stat.sumScore += Number(s.score || 0);
       if (s.score > stat.maxScore) stat.maxScore = s.score;
       if (s.score < stat.minScore) stat.minScore = s.score;
 
@@ -456,34 +623,122 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
       else stat.poorCount += 1;
     });
 
-    return Object.values(map).map(u => {
-      const avgScoreNum = u.total > 0 ? u.sumScore / u.total : 0;
-      const avgScore = avgScoreNum.toFixed(1);
-      const passRate = u.total > 0 ? Math.round((u.passed / u.total) * 100) : 0;
-      let rankLabel = 'CẦN ÔN LUYỆN';
-      let rankColor = 'bg-rose-50 text-rose-700 border-rose-200';
-      if (passRate >= 90 && avgScoreNum >= 8.0) {
-        rankLabel = 'ĐƠN VỊ XUẤT SẮC';
-        rankColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-      } else if (passRate >= 80 && avgScoreNum >= 6.5) {
-        rankLabel = 'ĐƠN VỊ ĐẠT KHÁ';
-        rankColor = 'bg-blue-50 text-blue-700 border-blue-200';
-      } else if (passRate >= 50 && avgScoreNum >= 5.0) {
-        rankLabel = 'ĐƠN VỊ ĐẠT';
-        rankColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
-      }
+    return Object.values(map)
+      .filter(u => u.total > 0 || (selectedUnitFilter !== 'ALL' && u.unitName === selectedUnitFilter))
+      .map(u => {
+        const avgScoreNum = u.total > 0 ? u.sumScore / u.total : 0;
+        const avgScore = avgScoreNum.toFixed(1);
+        const passRate = u.total > 0 ? Math.round((u.passed / u.total) * 100) : 0;
+        let rankLabel = 'CẦN ÔN LUYỆN';
+        let rankColor = 'bg-rose-50 text-rose-700 border-rose-200';
+        if (u.total === 0) {
+          rankLabel = 'CHƯA CÓ BÀI THI';
+          rankColor = 'bg-slate-50 text-slate-500 border-slate-200';
+        } else if (passRate >= 90 && avgScoreNum >= 8.0) {
+          rankLabel = 'ĐƠN VỊ XUẤT SẮC';
+          rankColor = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        } else if (passRate >= 80 && avgScoreNum >= 6.5) {
+          rankLabel = 'ĐƠN VỊ ĐẠT KHÁ';
+          rankColor = 'bg-blue-50 text-blue-700 border-blue-200';
+        } else if (passRate >= 50 && avgScoreNum >= 5.0) {
+          rankLabel = 'ĐƠN VỊ ĐẠT';
+          rankColor = 'bg-indigo-50 text-indigo-700 border-indigo-200';
+        }
+
+        return {
+          ...u,
+          avgScoreNum,
+          avgScore,
+          passRate,
+          minScoreDisplay: u.total > 0 ? u.minScore : 0,
+          rankLabel,
+          rankColor
+        };
+      })
+      .sort((a, b) => b.passRate - a.passRate || b.avgScoreNum - a.avgScoreNum);
+  }, [filteredReportSubmissions, units, selectedUnitFilter]);
+
+  const filteredUsersForReport = useMemo(() => {
+    return users.filter(u => {
+      const uUnit = u.unitName || u.unit || '';
+      const matchUnit = selectedUnitFilter === 'ALL' || uUnit === selectedUnitFilter;
+      
+      const displayName = u.fullName || u.name || '';
+      const email = u.email || '';
+      const matchSearch = searchCandidateQuery === '' || 
+        displayName.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
+        email.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
+        uUnit.toLowerCase().includes(searchCandidateQuery.toLowerCase());
+
+      return matchUnit && matchSearch;
+    });
+  }, [users, selectedUnitFilter, searchCandidateQuery]);
+
+  const accountReportData = useMemo(() => {
+    return filteredUsersForReport.map(u => {
+      const userProgress = progressList.filter(p => p.userId === u.id);
+      const totalLessons = userProgress.length;
+      const completedLessons = userProgress.filter(p => p.completed).length;
+      const avgProgress = totalLessons > 0 
+        ? Math.round(userProgress.reduce((sum, p) => sum + (p.overallProgress || 0), 0) / totalLessons)
+        : 0;
+
+      const userSubs = submissions.filter(s => s.userId === u.id);
+      const examCount = userSubs.length;
+      const highestScore = examCount > 0 ? Math.max(...userSubs.map(s => s.score)) : 0;
+      const passedCount = userSubs.filter(s => s.passed).length;
+
+      const examSummaryText = userSubs.map(s => {
+        return `${s.sessionTitle || 'Đợt kiểm tra'}: ${s.score}đ (${s.passed ? 'Đạt' : 'Chưa đạt'})`;
+      }).join('; ');
 
       return {
-        ...u,
-        avgScoreNum,
-        avgScore,
-        passRate,
-        minScoreDisplay: u.total > 0 ? u.minScore : 0,
-        rankLabel,
-        rankColor
+        user: u,
+        totalLessons,
+        completedLessons,
+        avgProgress,
+        examCount,
+        highestScore,
+        passedCount,
+        examSummaryText,
+        unitName: u.unitName || u.unit || 'Chưa xếp đơn vị',
+        rank: u.rank || u.userRank || '—',
+        position: u.position || u.userPosition || '—'
       };
-    }).sort((a, b) => b.passRate - a.passRate || b.avgScoreNum - a.avgScoreNum);
-  }, [filteredReportSubmissions]);
+    });
+  }, [filteredUsersForReport, progressList, submissions]);
+
+  const handleExportAccountReportToExcel = () => {
+    if (accountReportData.length === 0) {
+      alert('Không có dữ liệu tài khoản để xuất file Excel');
+      return;
+    }
+
+    const rows = accountReportData.map((d, idx) => ({
+      'STT': idx + 1,
+      'Họ và tên': d.user.fullName || d.user.name || '',
+      'Cấp bậc / Chức vụ': `${d.rank} • ${d.position}`,
+      'Đơn vị': d.unitName,
+      'Email': d.user.email || '',
+      'Số bài đang học': d.totalLessons,
+      'Số bài hoàn thành': d.completedLessons,
+      'Tiến độ học tập TB (%)': `${d.avgProgress}%`,
+      'Số lượt thi': d.examCount,
+      'Điểm số cao nhất': d.highestScore,
+      'Số lần ĐẠT': d.passedCount,
+      'Chi tiết các đợt thi': d.examSummaryText
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 6 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 25 },
+      { wch: 15 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 },
+      { wch: 12 }, { wch: 45 }
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Bao_Cao_Tung_Tai_Khoan');
+    XLSX.writeFile(wb, `BAO_CAO_TIEN_DO_HOC_VA_KIEM_TRA_TUNG_TAI_KHOAN.xlsx`);
+  };
 
   // Export Results Report to Excel with 2 detailed Worksheets (Unit Summary & Candidate Detail)
   const handleExportSubmissionsToExcel = (sessionTitle?: string) => {
@@ -708,7 +963,20 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
                         </p>
                       )}
 
-                      <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 text-center text-xs">
+                      {/* App Push Status Indicator */}
+                      {session.questions && session.questions.length > 0 ? (
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200/80 mt-2.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Đã đồng bộ {session.questions.length} câu hỏi lên App ({new Date(session.pushedToAppAt || session.updatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200/80 mt-2.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>Tự động đồng bộ câu hỏi từ Bộ đề lên App khi tạo/chỉnh sửa đợt</span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100 text-center text-xs">
                         <div className="bg-slate-50 rounded-xl p-2 border border-slate-200/60">
                           <span className="block text-[10px] font-bold text-slate-500">Bộ đề / Số câu</span>
                           <span className="font-bold text-slate-900 mt-0.5 block truncate" title={`${session.bankTitle || 'Bộ đề'}: ${displayTotalQuestions} câu`}>
@@ -732,7 +1000,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
 
                     {/* Controls Footer */}
                     <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => handleStartTestSimulator(session)}
                           className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all"
@@ -747,10 +1015,10 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
                             setSelectedSessionForReport(session);
                             setActiveTab('reports');
                           }}
-                          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200 transition-all"
+                          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition-all"
                         >
                           <BarChart3 className="w-3.5 h-3.5" />
-                          <span>Xem bảng điểm ({rate}% Đạt)</span>
+                          <span>Bảng điểm ({rate}% Đạt)</span>
                         </button>
                       </div>
 
@@ -859,14 +1127,25 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => handleViewBankDetail(bank)}
-                      className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200 transition-all"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Xem danh sách câu hỏi ({bank.totalQuestions})</span>
-                    </button>
+                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => handleCreateSessionFromBank(bank)}
+                        className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all"
+                        title="Khởi tạo đợt kiểm tra mới dựa trên bộ đề này"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Tạo Đợt Kiểm Tra</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleViewBankDetail(bank)}
+                        className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200 transition-all"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Xem câu hỏi ({bank.totalQuestions})</span>
+                      </button>
+                    </div>
 
                     <button
                       onClick={() => handleDeleteBank(bank.id, bank.title)}
@@ -997,8 +1276,14 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
             </div>
 
             <button
-              onClick={() => handleExportSubmissionsToExcel(selectedSessionForReport?.title)}
-              className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold shadow-sm transition-all"
+              onClick={() => {
+                if (reportViewMode === 'account') {
+                  handleExportAccountReportToExcel();
+                } else {
+                  handleExportSubmissionsToExcel(selectedSessionForReport?.title);
+                }
+              }}
+              className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold shadow-sm transition-all cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Xuất Báo cáo Excel (.xlsx)</span>
@@ -1006,7 +1291,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
           </div>
 
           {/* Report Sub-Tabs Navigation */}
-          <div className="flex items-center space-x-2 bg-slate-100 p-1.5 rounded-2xl w-full sm:w-fit text-xs font-bold border border-slate-200">
+          <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl w-full sm:w-fit text-xs font-bold border border-slate-200">
             <button
               onClick={() => setReportViewMode('unit')}
               className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all ${
@@ -1030,6 +1315,18 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
               <Users className="w-4 h-4 text-blue-600" />
               <span>Bảng Điểm Chi Tiết Quân Nhân ({filteredReportSubmissions.length})</span>
             </button>
+
+            <button
+              onClick={() => setReportViewMode('account')}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all ${
+                reportViewMode === 'account'
+                  ? 'bg-white text-blue-800 shadow-sm border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <TrendingUp className="w-4 h-4 text-emerald-600" />
+              <span>Báo Cáo Học Tập & Kiểm Tra Từng Tài Khoản ({users.length})</span>
+            </button>
           </div>
 
           {/* VIEW MODE 1: UNIT PERFORMANCE & SCORE MATRIX */}
@@ -1043,8 +1340,16 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
               </div>
 
               {unitStatsList.length === 0 ? (
-                <div className="p-12 text-center text-slate-500 text-xs">
-                  Chưa có dữ liệu bài thi đơn vị nào trong hệ thống.
+                <div className="p-12 text-center text-slate-500 text-xs space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                    <BarChart3 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-700 text-sm">Chưa có lượt dự thi thực tế nào từ ứng dụng</p>
+                    <p className="text-slate-500 text-xs mt-1 max-w-md mx-auto">
+                      Hệ thống đã chuyển sang chế độ tổng hợp 100% kết quả thật từ App. Khi quân nhân đăng nhập và nộp bài kiểm tra trên ứng dụng di động, kết quả thi đua đơn vị sẽ tự động cập nhật ngay lập tức tại đây.
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -1138,8 +1443,16 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
               </div>
 
               {filteredReportSubmissions.length === 0 ? (
-                <div className="p-12 text-center text-slate-500 text-xs">
-                  Chưa có dữ liệu bài làm nào phù hợp với bộ lọc hiện tại.
+                <div className="p-12 text-center text-slate-500 text-xs space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-700 text-sm">Chưa có kết quả bài làm chi tiết nào</p>
+                    <p className="text-slate-500 text-xs mt-1 max-w-md mx-auto">
+                      Dữ liệu tổng hợp hiện tại dựa 100% trên các lượt làm bài thực tế của quân nhân. Các bài thi nộp từ App di động hoặc từ bộ Giả lập thi sẽ xuất hiện realtime tại bảng này.
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -1200,6 +1513,116 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIEW MODE 3: COMPREHENSIVE STUDY & EXAM REPORT PER ACCOUNT */}
+          {reportViewMode === 'account' && (
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
+              <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-400" />
+                  <span>Báo Cáo Tổng Hợp Tốc Độ Học Tập & Kết Quả Kiểm Tra Theo Từng Tài Khoản ({accountReportData.length} tài khoản)</span>
+                </h3>
+                <span className="text-[10px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">
+                  Dữ liệu đồng bộ Realtime từ App di động
+                </span>
+              </div>
+
+              {accountReportData.length === 0 ? (
+                <div className="p-12 text-center text-slate-500 text-xs space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-700 text-sm">Không tìm thấy tài khoản người dùng nào</p>
+                    <p className="text-slate-500 text-xs mt-1 max-w-md mx-auto">
+                      Hãy thay đổi bộ lọc đơn vị hoặc kiểm tra lại từ khóa tìm kiếm.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase text-[10px] tracking-wider">
+                        <th className="p-3.5 w-12 text-center">STT</th>
+                        <th className="p-3.5">Họ và tên quân nhân</th>
+                        <th className="p-3.5">Cấp bậc / Chức vụ</th>
+                        <th className="p-3.5">Đơn vị</th>
+                        <th className="p-3.5 text-center">Bài đã học</th>
+                        <th className="p-3.5">Tiến độ Học TB</th>
+                        <th className="p-3.5 text-center">Số lượt thi</th>
+                        <th className="p-3.5 text-center">Điểm cao nhất</th>
+                        <th className="p-3.5">Chi tiết đợt thi đã tham gia</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                      {accountReportData.map((d, idx) => (
+                        <tr key={d.user.id || `acc-rep-${idx}`} className="hover:bg-blue-50/30 transition-colors">
+                          <td className="p-3.5 text-center font-mono text-slate-500">{idx + 1}</td>
+                          <td className="p-3.5">
+                            <div>
+                              <span className="font-bold text-slate-900 block text-sm">{d.user.fullName || d.user.name}</span>
+                              <span className="text-[11px] text-slate-400 font-mono block mt-0.5">{d.user.email}</span>
+                            </div>
+                          </td>
+                          <td className="p-3.5 text-slate-600">
+                            {d.rank} {d.position ? `• ${d.position}` : ''}
+                          </td>
+                          <td className="p-3.5">
+                            <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px] font-semibold border border-slate-200">
+                              {d.unitName}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-center font-mono font-bold text-slate-700 text-sm">
+                            {d.completedLessons} / {d.totalLessons} bài
+                          </td>
+                          <td className="p-3.5">
+                            <div className="flex items-center space-x-2">
+                              <div className="w-16 bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
+                                <div
+                                  className={`h-full ${d.avgProgress >= 80 ? 'bg-emerald-500' : d.avgProgress >= 50 ? 'bg-blue-500' : 'bg-slate-400'}`}
+                                  style={{ width: `${d.avgProgress}%` }}
+                                />
+                              </div>
+                              <span className="font-mono font-black text-slate-700 text-[11px]">{d.avgProgress}%</span>
+                            </div>
+                          </td>
+                          <td className="p-3.5 text-center font-mono font-bold text-blue-700 text-sm">
+                            {d.examCount} lượt
+                          </td>
+                          <td className="p-3.5 text-center font-mono font-black text-sm">
+                            {d.examCount > 0 ? (
+                              <span className={d.highestScore >= 5.0 ? 'text-emerald-700' : 'text-rose-600'}>
+                                {d.highestScore} / 10
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-medium">Chưa thi</span>
+                            )}
+                          </td>
+                          <td className="p-3.5 max-w-xs">
+                            {d.examCount > 0 ? (
+                              <div className="flex flex-col gap-1">
+                                {submissions.filter(s => s.userId === d.user.id).map(s => (
+                                  <div key={s.id} className="text-[10px] leading-tight flex items-center gap-1">
+                                    <span className="text-slate-500 font-bold truncate max-w-[120px]" title={s.sessionTitle}>{s.sessionTitle}:</span>
+                                    <span className={`px-1 rounded-sm font-mono font-bold ${s.passed ? 'bg-emerald-50 text-emerald-800 border border-emerald-100' : 'bg-rose-50 text-rose-800 border border-rose-100'}`}>
+                                      {s.score}đ ({s.passed ? 'Đạt' : 'Chưa đạt'})
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">Chưa ghi nhận bài thi nào</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1564,10 +1987,29 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
                 <p className="text-slate-500">Chưa có thông tin câu hỏi chi tiết.</p>
               ) : (
                 selectedBankForDetail.questions.map((q, idx) => (
-                  <div key={q.id || idx} className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
-                    <div className="font-bold text-slate-900">
-                      <span className="text-blue-700 font-mono mr-1.5">Câu #{q.stt || idx + 1}:</span>
-                      <span>{q.question}</span>
+                  <div key={q.id || idx} className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-bold text-slate-900 flex-1">
+                        <span className="text-blue-700 font-mono mr-1.5">Câu #{q.stt || idx + 1}:</span>
+                        <span>{q.question}</span>
+                      </div>
+                      <div className="flex items-center space-x-1 shrink-0">
+                        <button
+                          onClick={() => handleOpenEditQuestion(q)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 text-[11px] font-bold border border-amber-200 flex items-center space-x-1"
+                          title="Chỉnh sửa nội dung câu hỏi và đồng bộ tức thì lên App"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Sửa câu hỏi</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteQuestionFromBank(q.id)}
+                          className="p-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
+                          title="Xóa câu hỏi khỏi bộ đề"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pl-4">
@@ -1584,6 +2026,12 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
                         </div>
                       ))}
                     </div>
+
+                    {q.explanation && (
+                      <div className="pl-4 text-[11px] text-slate-500 italic">
+                        <span className="font-bold">Giải thích:</span> {q.explanation}
+                      </div>
+                    )}
                   </div>
                 ))
               )}
@@ -1610,6 +2058,107 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
                 Đóng
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: CHỈNH SỬA CÂU HỎI TRONG BỘ ĐỀ */}
+      {/* ========================================================= */}
+      {editingQuestion && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
+              <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-amber-400" />
+                <span>Chỉnh Sửa Câu Hỏi #{editingQuestion.stt}</span>
+              </h3>
+              <button
+                onClick={() => setEditingQuestion(null)}
+                className="text-slate-400 hover:text-white text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedQuestionSubmit} className="p-5 overflow-y-auto space-y-4 text-xs flex-1">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Nội dung câu hỏi *</label>
+                <textarea
+                  rows={3}
+                  value={editingQuestionForm.question}
+                  onChange={(e) => setEditingQuestionForm({ ...editingQuestionForm, question: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 font-medium"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-slate-700 font-bold">Các phương án trả lời *</label>
+                {editingQuestionForm.options.map((opt, idx) => (
+                  <div key={idx} className="flex items-center space-x-2">
+                    <span className="font-mono font-bold w-6 text-slate-500">{String.fromCharCode(65 + idx)}.</span>
+                    <input
+                      type="text"
+                      value={opt}
+                      onChange={(e) => {
+                        const newOpts = [...editingQuestionForm.options];
+                        newOpts[idx] = e.target.value;
+                        setEditingQuestionForm({ ...editingQuestionForm, options: newOpts });
+                      }}
+                      className="flex-1 px-3 py-1.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
+                      required
+                    />
+                    <label className="flex items-center space-x-1 cursor-pointer shrink-0">
+                      <input
+                        type="radio"
+                        name="correctAnswerOption"
+                        checked={editingQuestionForm.correctOptionIndex === idx}
+                        onChange={() => setEditingQuestionForm({ ...editingQuestionForm, correctOptionIndex: idx })}
+                        className="text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className={`text-[11px] font-bold ${editingQuestionForm.correctOptionIndex === idx ? 'text-emerald-700' : 'text-slate-500'}`}>
+                        Đúng
+                      </span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Giải thích đáp án (không bắt buộc)</label>
+                <input
+                  type="text"
+                  value={editingQuestionForm.explanation}
+                  onChange={(e) => setEditingQuestionForm({ ...editingQuestionForm, explanation: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500"
+                  placeholder="Nhập giải thích cho đáp án..."
+                />
+              </div>
+
+              <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-2xl text-[11px] text-amber-900 font-medium flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Nội dung sau khi sửa sẽ được lưu lên Cloud Firestore và tự động cập nhật ngay lập tức cho các thiết bị di động.</span>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingQuestion(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingQuestion}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md shadow-blue-500/20 disabled:opacity-50 flex items-center space-x-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{isSavingQuestion ? 'Đang lưu & đẩy lên App...' : 'Lưu & Đẩy Lập Tức Lên App'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
