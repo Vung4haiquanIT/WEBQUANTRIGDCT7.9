@@ -66,17 +66,23 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
     status: 'ACTIVE' as 'ACTIVE' | 'COMPLETED' | 'DRAFT'
   });
 
-  // Fetch initial data
+  // Fetch initial data & setup realtime sync listeners
   useEffect(() => {
     loadAllData();
 
-    // Setup realtime listener for active sessions
+    // Realtime listener for exam sessions
     const unsubSessions = api.listenExamSessions((updatedSessions) => {
       setSessions(updatedSessions);
     });
 
+    // Realtime listener for all candidate exam submissions (instant sync across accounts)
+    const unsubSubmissions = api.listenExamSubmissions(undefined, (updatedSubmissions) => {
+      setSubmissions(updatedSubmissions);
+    });
+
     return () => {
       if (unsubSessions) unsubSessions();
+      if (unsubSubmissions) unsubSubmissions();
     };
   }, []);
 
@@ -880,6 +886,25 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
       {/* ========================================================= */}
       {activeTab === 'reports' && (
         <div className="space-y-4">
+          {/* Realtime Sync Status Banner */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900 text-white p-4 rounded-2xl shadow-sm border border-slate-800">
+            <div>
+              <h3 className="font-extrabold text-sm flex items-center gap-2 text-emerald-400">
+                <BarChart3 className="w-4 h-4" />
+                <span>Tổng Hợp Báo Cáo Kết Quả Thi Trực Tuyến</span>
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Hệ thống tự động đồng bộ tức thì mọi bài nộp thi từ các tài khoản người dùng tham gia trên App di động.
+              </p>
+            </div>
+            <div className="shrink-0 flex items-center">
+              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950 text-emerald-400 text-xs font-bold border border-emerald-800/60 shadow-inner">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Đồng bộ Tức thì (Realtime Cloud)</span>
+              </span>
+            </div>
+          </div>
+
           {/* Summary KPI Panel */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-3">

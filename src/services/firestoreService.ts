@@ -2676,12 +2676,17 @@ export const firestoreService = {
     return fullSubmission;
   },
 
-  listenExamSubmissions: (sessionId: string, callback: (subs: ExamSubmission[]) => void) => {
+  listenExamSubmissions: (sessionId: string | undefined, callback: (subs: ExamSubmission[]) => void) => {
     const colRef = collection(db, 'exam_submissions');
-    const q = query(colRef, where('sessionId', '==', sessionId));
+    let q;
+    if (sessionId && sessionId !== 'ALL') {
+      q = query(colRef, where('sessionId', '==', sessionId));
+    } else {
+      q = query(colRef);
+    }
     return onSnapshot(q, (snapshot) => {
-      const subs = snapshot.docs.map(d => d.data() as ExamSubmission);
-      subs.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+      const subs = snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExamSubmission);
+      subs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
       callback(subs);
     }, (err) => {
       console.warn('[listenExamSubmissions warning]:', err);

@@ -1319,7 +1319,7 @@ export const api = {
     return await firestoreService.submitExamResult(submission);
   },
 
-  listenExamSubmissions: (sessionId: string, callback: (subs: ExamSubmission[]) => void) => {
+  listenExamSubmissions: (sessionId: string | undefined, callback: (subs: ExamSubmission[]) => void) => {
     return firestoreService.listenExamSubmissions(sessionId, callback);
   },
 
