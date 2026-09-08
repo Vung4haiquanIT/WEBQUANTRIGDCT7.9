@@ -2638,14 +2638,24 @@ export const firestoreService = {
     try {
       const colRef = collection(db, 'exam_submissions');
       let q;
-      if (sessionId) {
+      if (sessionId && sessionId !== 'ALL') {
         q = query(colRef, where('sessionId', '==', sessionId));
       } else {
         q = query(colRef);
       }
       const snap = await getDocs(q);
-      const subs = snap.docs.map(d => d.data() as ExamSubmission);
-      return subs.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+
+      // Clean up any legacy sample documents if present
+      const sampleDocs = snap.docs.filter(d => d.id.startsWith('sub-sample-'));
+      if (sampleDocs.length > 0) {
+        const batch = writeBatch(db);
+        sampleDocs.forEach(d => batch.delete(d.ref));
+        await batch.commit().catch(() => {});
+      }
+
+      const realDocs = snap.docs.filter(d => !d.id.startsWith('sub-sample-'));
+      const subs = realDocs.map(d => ({ ...d.data(), id: d.id }) as ExamSubmission);
+      return subs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
     } catch (err) {
       console.warn('[getExamSubmissions error]:', err);
       return [];
@@ -2655,24 +2665,33 @@ export const firestoreService = {
   submitExamResult: async (submission: Partial<ExamSubmission>): Promise<ExamSubmission> => {
     const id = submission.id || `sub-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const now = new Date().toISOString();
+    const numScore = Number(submission.score ?? 0);
+    const numCorrect = Number(submission.correctCount ?? 0);
+    const numTotal = Number(submission.totalQuestions ?? 0);
+    const isPassed = submission.passed ?? (numScore >= 5.0);
+
     const fullSubmission: ExamSubmission = {
       id,
       sessionId: submission.sessionId || '',
-      sessionTitle: submission.sessionTitle || 'Kiểm tra',
+      sessionTitle: submission.sessionTitle || 'Kiểm tra nhận thức',
       userId: submission.userId || 'user-anon',
-      userName: submission.userName || 'Thí sinh',
-      userRank: submission.userRank || '',
-      userPosition: submission.userPosition || '',
+      userName: submission.userName || 'Thí sinh dự thi',
+      userRank: submission.userRank || 'Quân nhân',
+      userPosition: submission.userPosition || 'Cán bộ / Chiến sĩ',
       unitName: submission.unitName || 'Vùng 4 Hải Quân',
-      score: submission.score || 0,
-      correctCount: submission.correctCount || 0,
-      totalQuestions: submission.totalQuestions || 0,
-      passed: submission.passed ?? ((submission.score || 0) >= 5.0),
-      timeSpentSeconds: submission.timeSpentSeconds || 0,
+      score: numScore,
+      correctCount: numCorrect,
+      totalQuestions: numTotal,
+      passed: isPassed,
+      timeSpentSeconds: Number(submission.timeSpentSeconds ?? 0),
       answers: submission.answers || [],
-      submittedAt: now
+      submittedAt: submission.submittedAt || now
     };
+
+    // Save submission to Firestore
     await setDoc(doc(db, 'exam_submissions', id), fullSubmission);
+    // Ensure flag is set
+    await setDoc(doc(db, 'system_meta', 'init_flags'), { examSubmissionsSeeded: true }, { merge: true });
     return fullSubmission;
   },
 
@@ -2685,7 +2704,8 @@ export const firestoreService = {
       q = query(colRef);
     }
     return onSnapshot(q, (snapshot) => {
-      const subs = snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExamSubmission);
+      const realDocs = snapshot.docs.filter(d => !d.id.startsWith('sub-sample-'));
+      const subs = realDocs.map(d => ({ ...d.data(), id: d.id }) as ExamSubmission);
       subs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
       callback(subs);
     }, (err) => {

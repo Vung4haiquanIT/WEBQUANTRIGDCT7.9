@@ -399,11 +399,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [] })
   // Filtered submissions for Report view
   const filteredReportSubmissions = useMemo(() => {
     return submissions.filter(s => {
-      const matchSession = selectedSessionFilter === 'ALL' || s.sessionId === selectedSessionFilter;
-      const matchUnit = selectedUnitFilter === 'ALL' || s.unitName === selectedUnitFilter;
+      const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
+      const matchUnit = selectedUnitFilter === 'ALL' || !selectedUnitFilter || s.unitName === selectedUnitFilter;
       const matchSearch = !searchCandidateQuery.trim() || 
-        s.userName.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        s.unitName.toLowerCase().includes(searchCandidateQuery.toLowerCase());
+        (s.userName || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
+        (s.unitName || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
+        (s.userRank || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
+        (s.sessionTitle || '').toLowerCase().includes(searchCandidateQuery.toLowerCase());
       return matchSession && matchUnit && matchSearch;
     });
   }, [submissions, selectedSessionFilter, selectedUnitFilter, searchCandidateQuery]);
