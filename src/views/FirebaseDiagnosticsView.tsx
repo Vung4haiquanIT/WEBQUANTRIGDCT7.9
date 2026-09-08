@@ -42,6 +42,73 @@ export const FirebaseDiagnosticsView: React.FC = () => {
   const [isScanningOrphans, setIsScanningOrphans] = useState(false);
   const [orphanMessage, setOrphanMessage] = useState('');
 
+  // Cloudinary Deep Clean state
+  const [cleanLessonId, setCleanLessonId] = useState('');
+  const [cleanFolderPath, setCleanFolderPath] = useState('');
+  const [isPurgingLesson, setIsPurgingLesson] = useState(false);
+  const [isPurgingFolder, setIsPurgingFolder] = useState(false);
+  const [purgeResult, setPurgeResult] = useState<{
+    success: boolean;
+    message: string;
+    details?: any;
+  } | null>(null);
+
+  const handlePurgeLessonCloudinary = async () => {
+    if (!cleanLessonId.trim()) return;
+    setIsPurgingLesson(true);
+    setPurgeResult(null);
+    try {
+      const resp = await fetch('/api/cloudinary/purge-lesson', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lessonId: cleanLessonId.trim() })
+      });
+      const data = await resp.json();
+      setPurgeResult({
+        success: data.success,
+        message: data.success
+          ? `Đã xóa sạch dữ liệu bài học ${data.lessonId}: Đã xóa ${data.totalAssetsDestroyed || 0} tệp, đã dọn ${data.foldersPurged?.length || 0} thư mục.`
+          : `Lỗi hoặc cảnh báo: ${data.errors?.join(', ') || 'Không thể xóa'}`,
+        details: data
+      });
+    } catch (err: any) {
+      setPurgeResult({
+        success: false,
+        message: `Lỗi kết nối khi dọn bài học: ${err.message}`
+      });
+    } finally {
+      setIsPurgingLesson(false);
+    }
+  };
+
+  const handlePurgeFolderCloudinary = async () => {
+    if (!cleanFolderPath.trim()) return;
+    setIsPurgingFolder(true);
+    setPurgeResult(null);
+    try {
+      const resp = await fetch('/api/cloudinary/delete-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: cleanFolderPath.trim() })
+      });
+      const data = await resp.json();
+      setPurgeResult({
+        success: data.success,
+        message: data.success
+          ? `Đã xóa thư mục "${data.folder}": Đã hủy ${data.resourcesDeleted || 0} tệp, trạng thái folder: ${data.folderDeleted ? 'Đã xóa hoàn toàn' : 'Đã dọn các tệp bên trong'}.`
+          : `Lỗi hoặc cảnh báo: ${data.errors?.join(', ') || 'Không thể xóa thư mục'}`,
+        details: data
+      });
+    } catch (err: any) {
+      setPurgeResult({
+        success: false,
+        message: `Lỗi kết nối khi xóa thư mục: ${err.message}`
+      });
+    } finally {
+      setIsPurgingFolder(false);
+    }
+  };
+
   const handleScanOrphans = async () => {
     setIsScanningOrphans(true);
     setOrphanMessage('Đang quét toàn bộ Firestore tìm dữ liệu mồ côi...');
@@ -403,6 +470,110 @@ export const FirebaseDiagnosticsView: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        {/* CLOUDINARY DEEP CLEAN & PERMISSION TOOL CARD */}
+        <div className="bg-white rounded-2xl border border-blue-200 shadow-xs overflow-hidden p-6 space-y-5">
+          <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
+            <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+              🧹
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900 uppercase">
+                CÔNG CỤ DỌN DẸP & XÓA TRIỆT ĐỂ CLOUDINARY (DEEP PURGE)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Cho phép xóa dọn toàn bộ folder, xóa ảnh slide/video/tài liệu và làm sạch triệt để bộ nhớ CDN theo mã bài học hoặc đường dẫn thư mục.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Box 1: Purge by Lesson ID */}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wide block">
+                1. Xóa sạch mọi tệp & Thư mục theo Mã bài học (Lesson ID):
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Ví dụ: lesson-1788835500504"
+                  value={cleanLessonId}
+                  onChange={(e) => setCleanLessonId(e.target.value)}
+                  className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-white font-mono"
+                />
+                <button
+                  onClick={handlePurgeLessonCloudinary}
+                  disabled={isPurgingLesson || !cleanLessonId.trim()}
+                  className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-2 rounded-lg text-xs tracking-wider uppercase disabled:opacity-50 flex items-center space-x-1.5 shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isPurgingLesson ? 'animate-spin' : ''}`} />
+                  <span>{isPurgingLesson ? 'Đang xóa...' : 'Xóa bài học'}</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Sẽ quét và xóa sạch tất cả thư mục <code>GDCT_V4/SLIDE/[id]</code>, <code>GDCT_V4/TAILIEU/[id]</code>, <code>GDCT_V4/VIDEOS/[id]</code> trên Cloudinary.
+              </p>
+            </div>
+
+            {/* Box 2: Purge by Folder Path */}
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wide block">
+                2. Xóa theo Đường dẫn thư mục Cloudinary (Folder Path):
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Ví dụ: GDCT_V4/SLIDE/lesson-1788835500504"
+                  value={cleanFolderPath}
+                  onChange={(e) => setCleanFolderPath(e.target.value)}
+                  className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-white font-mono"
+                />
+                <button
+                  onClick={handlePurgeFolderCloudinary}
+                  disabled={isPurgingFolder || !cleanFolderPath.trim()}
+                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-4 py-2 rounded-lg text-xs tracking-wider uppercase disabled:opacity-50 flex items-center space-x-1.5 shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isPurgingFolder ? 'animate-spin' : ''}`} />
+                  <span>{isPurgingFolder ? 'Đang xóa...' : 'Xóa Folder'}</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Sẽ xóa mọi asset có tiền tố (prefix) này và giải phóng thư mục đó.
+              </p>
+            </div>
+          </div>
+
+          {/* Purge Result Alert */}
+          {purgeResult && (
+            <div className={`p-4 rounded-xl border text-xs font-medium ${
+              purgeResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-900' : 'bg-rose-50 border-rose-300 text-rose-900'
+            }`}>
+              <div className="font-bold mb-1">{purgeResult.success ? '✅ KẾT QUẢ DỌN DẸP THÀNH CÔNG:' : '⚠️ CẢNH BÁO TỪ CLOUDINARY:'}</div>
+              <div>{purgeResult.message}</div>
+              {purgeResult.details && (
+                <pre className="mt-2 p-2 bg-black/10 rounded-sm text-[10px] overflow-x-auto font-mono">
+                  {JSON.stringify(purgeResult.details, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+
+          {/* Permission Guide Callout */}
+          <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2 text-xs text-amber-950">
+            <div className="font-extrabold uppercase flex items-center space-x-2 text-amber-800">
+              <span>ℹ️ HƯỚNG DẪN BẬT QUYỀN XÓA TỰ ĐỘNG TRIỆT ĐỂ (CLOUDINARY API PERMISSIONS):</span>
+            </div>
+            <p className="leading-relaxed">
+              Nếu API Cloudinary trả về lỗi <code>403 Forbidden / missing permissions (actions=['delete'])</code>, điều này do tài khoản Cloudinary đang bật chế độ bảo mật hạn chế xóa từ API. Để cho phép hệ thống tự động xóa sạch 100% mọi nơi:
+            </p>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-[11px] text-slate-700 font-medium">
+              <li>Đăng nhập <a href="https://console.cloudinary.com" target="_blank" rel="noreferrer" className="text-blue-600 underline font-bold">Cloudinary Console</a>.</li>
+              <li>Vào <strong>Settings (Biểu tượng Bánh răng)</strong> ➜ <strong>Security</strong>.</li>
+              <li>Tại mục <strong>Restricted media types</strong> hoặc <strong>Media management</strong>: Bỏ chọn hạn chế hoặc kích hoạt quyền <strong>Delete</strong> cho API Key.</li>
+              <li>Sau khi bật, mọi thao tác xóa bài học, xóa slide từ web sẽ tự động xóa sạch triệt để toàn bộ thư mục và tệp tin trên Cloudinary.</li>
+            </ol>
           </div>
         </div>
         </div>

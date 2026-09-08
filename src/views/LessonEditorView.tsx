@@ -517,19 +517,18 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   };
 
   const handleDeleteDocument = async (docObj: SourceDocument) => {
-    try {
-      await api.deleteSourceDocumentCascade(
-        currentLesson.id,
-        docObj.id,
-        docObj.cloudinaryPublicId || (docObj as any).storagePath || '',
-        docObj.resourceType || 'raw'
-      );
-      setSourceDocs(prev => prev.filter(d => d.id !== docObj.id));
-      showToast('Đã xóa tài liệu đính kèm thành công!');
-    } catch (err: any) {
-      console.error('Error deleting document:', err);
-      showToast('Lỗi khi xóa tài liệu: ' + (err.message || 'Lỗi hệ thống'));
-    }
+    // 1. Optimistic removal immediately
+    setSourceDocs(prev => prev.filter(d => d.id !== docObj.id));
+    showToast('Đã xóa tài liệu đính kèm.');
+    // 2. Background cascade purge
+    api.deleteSourceDocumentCascade(
+      currentLesson.id,
+      docObj.id,
+      docObj.cloudinaryPublicId || (docObj as any).storagePath || '',
+      docObj.resourceType || 'raw'
+    ).catch(err => {
+      console.warn('Background delete document warning:', err);
+    });
   };
 
 
@@ -741,7 +740,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
     const secItems = items.filter(i => i.sectionId === secId);
     const secItemIds = new Set(secItems.map(i => i.id));
 
-    // Cập nhật State bất biến (Immutability) chuẩn React
+    // Cập nhật State bất biến (Immutability) chuẩn React ngay lập tức
     setSections(prevSections => {
       const filtered = prevSections.filter(s => s.id !== secId);
       return filtered.map((s, idx) => ({ ...s, order: idx + 1 }));
@@ -762,14 +761,11 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
       }
     }
 
-    try {
-      await api.deleteSectionCascade(currentLesson.id, secId);
-      showToast('Đã xóa Phần và toàn bộ nội dung liên quan thành công trên hệ thống & Firebase!');
-    } catch (err: any) {
-      console.error('Error deleting section:', err);
-      showToast('❌ Lỗi xóa Phần: ' + (err.message || 'Lỗi hệ thống'));
-      await loadStructuredData();
-    }
+    showToast('Đã xóa Phần.');
+    // Cascade delete in background
+    api.deleteSectionCascade(currentLesson.id, secId).catch(err => {
+      console.warn('Background delete section warning:', err);
+    });
   };
 
   const handleAddItem = async (secId: string) => {
@@ -802,7 +798,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
     }
     const item = items.find(i => i.id === itemId);
 
-    // Cập nhật State bất biến (Immutability) chuẩn React
+    // Cập nhật State bất biến (Immutability) chuẩn React ngay lập tức
     setItems(prevItems => prevItems.filter(i => i.id !== itemId));
     setQuestions(prevQuestions => prevQuestions.filter(q => q.itemId !== itemId));
 
@@ -815,14 +811,11 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
       }
     }
 
-    try {
-      await api.deleteItemCascade(itemId);
-      showToast('Đã xóa Mục và dữ liệu liên quan thành công trên hệ thống & Firebase!');
-    } catch (err: any) {
-      console.error('Error deleting item:', err);
-      showToast('❌ Lỗi xóa Mục: ' + (err.message || 'Lỗi hệ thống'));
-      await loadStructuredData();
-    }
+    showToast('Đã xóa Mục.');
+    // Background delete
+    api.deleteItemCascade(itemId).catch(err => {
+      console.warn('Background delete item warning:', err);
+    });
   };
 
   const handleAddQuestionToItem = (itemId: string) => {
@@ -883,18 +876,12 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   };
 
   const handleDeleteQuestion = async (qId: string) => {
-    if (qId.startsWith('temp_')) {
-      setQuestions(prev => prev.filter(q => q.id !== qId));
-      showToast('Đã xóa câu hỏi tạm thời.');
-      return;
-    }
-    try {
-      await api.deleteQuestion(qId);
-      setQuestions(prev => prev.filter(q => q.id !== qId));
-      showToast('🗑️ Đã xóa câu hỏi kiểm tra khỏi Firebase thành công!');
-    } catch (err: any) {
-      console.error('Error deleting question:', err);
-      showToast('❌ Lỗi xóa câu hỏi khỏi Firebase: ' + (err.message || 'Lỗi hệ thống'));
+    setQuestions(prev => prev.filter(q => q.id !== qId));
+    showToast('Đã xóa câu hỏi.');
+    if (!qId.startsWith('temp_')) {
+      api.deleteQuestion(qId).catch(err => {
+        console.warn('Background delete question warning:', err);
+      });
     }
   };
 
@@ -1273,18 +1260,16 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
 
   const handleDeleteSlideSetConfirm = async () => {
     if (!slideSet) return;
-    try {
-      setIsDeletingSet(true);
-      await api.deleteSlideSet(slideSet.id, currentLesson.id);
-      setSlideSet(null);
-      setSlides([]);
-      setShowDeleteSlideSetConfirm(false);
-      showToast('Đã xóa bộ slide bài giảng.');
-    } catch (err: any) {
-      showToast(`Lỗi xóa bộ slide: ${err.message}`);
-    } finally {
-      setIsDeletingSet(false);
-    }
+    const setId = slideSet.id;
+    // 1. Optimistic removal & close modal immediately
+    setSlideSet(null);
+    setSlides([]);
+    setShowDeleteSlideSetConfirm(false);
+    showToast('Đã xóa toàn bộ slide bài giảng.');
+    // 2. Background cascade purge of all Cloudinary slide assets and firestore records
+    api.deleteSlideSet(setId, currentLesson.id).catch(err => {
+      console.warn('Background deleteSlideSet warning:', err);
+    });
   };
 
   const handleCreateSlide = async (e: React.FormEvent) => {
@@ -1305,13 +1290,13 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   };
 
   const handleDeleteSlide = async (id: string) => {
-    try {
-      await api.deleteSlide(id);
-      setSlides(slides.filter((s) => s.id !== id));
-      showToast('Đã xóa slide thành công trên hệ thống & Firebase!');
-    } catch {
-      showToast('Lỗi xóa slide');
-    }
+    // 1. Optimistic removal immediately
+    setSlides(prev => prev.filter((s) => s.id !== id));
+    showToast('Đã xóa slide.');
+    // 2. Background cascade delete
+    api.deleteSlide(id).catch(err => {
+      console.warn('Background deleteSlide warning:', err);
+    });
   };
 
   const handleMoveSlide = async (index: number, direction: 'up' | 'down') => {
@@ -1452,13 +1437,13 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   };
 
   const handleDeleteContent = async (id: string) => {
-    try {
-      await api.deleteContent(id);
-      setContents(contents.filter((c) => c.id !== id));
-      showToast('Đã xóa mục nội dung thành công!');
-    } catch {
-      showToast('Lỗi xóa nội dung');
-    }
+    // 1. Optimistic removal immediately
+    setContents(prev => prev.filter((c) => c.id !== id));
+    showToast('Đã xóa mục nội dung.');
+    // 2. Background delete
+    api.deleteContent(id).catch(err => {
+      console.warn('Background delete content warning:', err);
+    });
   };
 
   // Helper to extract media duration client-side
@@ -1585,18 +1570,15 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   // Execute Delete Video
   const handleExecuteDeleteVideo = async () => {
     if (!videoToDelete) return;
-    try {
-      setIsDeletingVideo(true);
-      await api.deleteVideoCascade(currentLesson.id, videoToDelete.id, videoToDelete.cloudinaryPublicId);
-      setVideos(prev => prev.filter(v => v.id !== videoToDelete.id));
-      showToast(`Đã xóa video "${videoToDelete.title}" khỏi Cloudinary và bài học`);
-      setVideoToDelete(null);
-    } catch (err: any) {
-      console.error('Error deleting video:', err);
-      showToast(`❌ Lỗi xóa video: ${err.message || 'Lỗi hệ thống'}`);
-    } finally {
-      setIsDeletingVideo(false);
-    }
+    const targetVideo = videoToDelete;
+    // 1. Optimistic removal & close modal immediately
+    setVideos(prev => prev.filter(v => v.id !== targetVideo.id));
+    setVideoToDelete(null);
+    showToast(`Đã xóa video "${targetVideo.title}".`);
+    // 2. Background cascade deletion
+    api.deleteVideoCascade(currentLesson.id, targetVideo.id, targetVideo.cloudinaryPublicId).catch(err => {
+      console.warn('Background delete video warning:', err);
+    });
   };
 
   const handleCreateVideo = async (e: React.FormEvent) => {
@@ -1716,18 +1698,15 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   // Execute Delete Audio
   const handleExecuteDeleteAudio = async () => {
     if (!audioToDelete) return;
-    try {
-      setIsDeletingAudio(true);
-      await api.deleteAudioCascade(currentLesson.id, audioToDelete.id, audioToDelete.cloudinaryPublicId);
-      setAudios(prev => prev.filter(a => a.id !== audioToDelete.id));
-      showToast(`Đã xóa audio "${audioToDelete.title}" khỏi Cloudinary và bài học`);
-      setAudioToDelete(null);
-    } catch (err: any) {
-      console.error('Error deleting audio:', err);
-      showToast(`❌ Lỗi xóa audio: ${err.message || 'Lỗi hệ thống'}`);
-    } finally {
-      setIsDeletingAudio(false);
-    }
+    const targetAudio = audioToDelete;
+    // 1. Optimistic removal & close modal immediately
+    setAudios(prev => prev.filter(a => a.id !== targetAudio.id));
+    setAudioToDelete(null);
+    showToast(`Đã xóa audio "${targetAudio.title}".`);
+    // 2. Background cascade deletion
+    api.deleteAudioCascade(currentLesson.id, targetAudio.id, targetAudio.cloudinaryPublicId).catch(err => {
+      console.warn('Background delete audio warning:', err);
+    });
   };
 
   const handleCreateAudio = async (e: React.FormEvent) => {

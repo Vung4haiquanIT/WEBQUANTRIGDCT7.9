@@ -6,7 +6,9 @@ import {
   CheckCircle2, 
   RefreshCw,
   User as UserIcon,
-  Award
+  Award,
+  LogOut,
+  Shield
 } from 'lucide-react';
 import { DongSonDrum } from './DongSonMotif';
 import { SystemNotification } from '../types';
@@ -20,6 +22,8 @@ interface HeaderProps {
   setSearchTerm?: (term: string) => void;
   activeTab?: string;
   onOpenTrash?: () => void;
+  adminUser?: { email: string; name: string; role: string } | null;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -31,6 +35,8 @@ export const Header: React.FC<HeaderProps> = ({
   setSearchTerm = (_term: string) => {},
   activeTab,
   onOpenTrash,
+  adminUser,
+  onLogout,
 }) => {
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
@@ -162,7 +168,7 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Current Officer Profile */}
+        {/* Current Officer Profile & Logout */}
         <div className="flex items-center space-x-3 pl-3 border-l border-slate-700">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 p-0.5 flex-shrink-0 shadow-sm">
             <div className="w-full h-full bg-slate-900 rounded-[9px] flex items-center justify-center">
@@ -171,14 +177,26 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="hidden xl:block text-left">
             <div className="text-xs font-bold text-white flex items-center space-x-1">
-              <span>Đại tá Nguyễn Văn Hùng</span>
+              <span>{adminUser?.email || 'admin@v4.hq'}</span>
               <Award className="w-3 h-3 text-amber-400 inline" />
             </div>
             <div className="text-[10px] text-slate-300 font-medium truncate max-w-[180px]">
-              Chủ nhiệm Chính trị Vùng 4 (Quản trị cấp cao)
+              {adminUser?.name || 'Ban Tuyên Huấn Vùng 4'} (Quản trị viên)
             </div>
             <div className="text-[9px] text-amber-300 font-mono">{currentTime}</div>
           </div>
+
+          {onLogout && (
+            <button
+              id="header-logout-btn"
+              onClick={onLogout}
+              title="Đăng xuất khỏi hệ thống quản trị"
+              className="p-2 ml-1 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-700/50 hover:border-rose-500 transition-colors flex items-center space-x-1.5 text-xs font-semibold"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Đăng xuất</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

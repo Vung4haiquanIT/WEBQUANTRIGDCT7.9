@@ -3400,7 +3400,12 @@ function extractCloudinaryCandidates(rawInput: string, hintResourceType?: string
     : cleaned;
 
   // Build unique candidate IDs in preferred order
-  const candidateIds = Array.from(new Set([withoutExt, withExt, rawInput.trim()].filter(Boolean)));
+  const candidateIds = Array.from(new Set([
+    withoutExt, 
+    withExt, 
+    fileNamePart.replace(/\.[^/.]+$/, ''), // just filename without dir
+    rawInput.trim()
+  ].filter(Boolean)));
 
   // Build types to try
   const primaryTypes = detectedType ? [detectedType] : (hintResourceType ? [hintResourceType] : ['image', 'video', 'raw']);
@@ -3413,10 +3418,11 @@ function extractCloudinaryCandidates(rawInput: string, hintResourceType?: string
 async function destroySingleCloudinaryAsset(
   rawInput: string,
   hintResourceType?: string
-): Promise<{ success: boolean; result: any; matchedId?: string; matchedType?: string }> {
+): Promise<{ success: boolean; result: any; matchedId?: string; matchedType?: string; error?: string }> {
   const { candidateIds, typesToTry } = extractCloudinaryCandidates(rawInput, hintResourceType);
 
   let lastResult: any = null;
+  let lastErrorMsg = '';
 
   for (const candId of candidateIds) {
     for (const rType of typesToTry) {
@@ -3426,17 +3432,243 @@ async function destroySingleCloudinaryAsset(
           invalidate: true
         });
         lastResult = delRes;
-        if (delRes && delRes.result === 'ok') {
-          console.log(`[Cloudinary Destroy SUCCESS] Destroyed: ${candId} (type: ${rType})`);
-          return { success: true, result: delRes, matchedId: candId, matchedType: rType };
+        if (delRes && (delRes.result === 'ok' || delRes.result === 'not found')) {
+          if (delRes.result === 'ok') {
+            console.log(`[Cloudinary Destroy SUCCESS] Destroyed: ${candId} (type: ${rType})`);
+            return { success: true, result: delRes, matchedId: candId, matchedType: rType };
+          }
         }
       } catch (err: any) {
-        // Continue trying next candidate/type
+        lastErrorMsg = err?.message || String(err);
+        if (lastErrorMsg.includes('missing permissions') || lastErrorMsg.includes('403')) {
+          console.warn(`[Cloudinary Destroy Permission Warning]: ${lastErrorMsg}`);
+        }
       }
     }
   }
 
-  return { success: false, result: lastResult || { result: 'not_found' } };
+  return { 
+    success: lastResult?.result === 'ok', 
+    result: lastResult || { result: 'not_found', details: lastErrorMsg },
+    error: lastErrorMsg || undefined
+  };
+}
+
+// Thorough helper to delete all resources in a Cloudinary folder and delete the folder itself
+async function destroyCloudinaryFolder(folderPath: string): Promise<{
+  success: boolean;
+  folder: string;
+  resourcesDeleted: number;
+  folderDeleted: boolean;
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let resourcesDeleted = 0;
+  let folderDeleted = false;
+
+  const cleanFolder = folderPath.trim().replace(/^\/+|\/+$/g, '');
+  if (!cleanFolder) return { success: true, folder: '', resourcesDeleted: 0, folderDeleted: false, errors: [] };
+
+  const prefixesToTry = Array.from(new Set([
+    cleanFolder,
+    cleanFolder.toLowerCase(),
+    cleanFolder.toUpperCase(),
+    `${cleanFolder}/`
+  ]));
+
+  const resourceTypes: ('image' | 'video' | 'raw')[] = ['image', 'video', 'raw'];
+
+  // 1. Search resources in folder via Cloudinary Search API (catches dynamic folders)
+  try {
+    const searchRes = await cloudinary.search.expression(`folder:"*${cleanFolder}*" OR asset_folder:"*${cleanFolder}*"`).max_results(500).execute();
+    if (searchRes && searchRes.resources && searchRes.resources.length > 0) {
+      console.log(`[Cloudinary Folder Search] Found ${searchRes.resources.length} items in folder ${cleanFolder}`);
+      const grouped: Record<string, string[]> = {};
+      searchRes.resources.forEach((r: any) => {
+        const t = r.resource_type || 'image';
+        if (!grouped[t]) grouped[t] = [];
+        grouped[t].push(r.public_id);
+      });
+
+      for (const [t, ids] of Object.entries(grouped)) {
+        for (let i = 0; i < ids.length; i += 100) {
+          const chunk = ids.slice(i, i + 100);
+          try {
+            const delRes: any = await cloudinary.api.delete_resources(chunk, {
+              resource_type: t as any,
+              invalidate: true
+            });
+            if (delRes && delRes.deleted) {
+              const count = Object.keys(delRes.deleted).length;
+              resourcesDeleted += count;
+            }
+          } catch (delErr: any) {
+            // Fallback individual destroy
+            const fallbacks = await Promise.all(chunk.map(id => destroySingleCloudinaryAsset(id, t)));
+            resourcesDeleted += fallbacks.filter(f => f.success).length;
+          }
+        }
+      }
+    }
+  } catch (searchErr: any) {
+    // Search API might not find or throw, proceed to prefix delete
+  }
+
+  // 2. Delete all resources matching the folder prefix across all resource types
+  for (const prefix of prefixesToTry) {
+    for (const rType of resourceTypes) {
+      try {
+        const delRes: any = await cloudinary.api.delete_resources_by_prefix(prefix, {
+          resource_type: rType,
+          invalidate: true
+        });
+        if (delRes && delRes.deleted) {
+          const count = Object.keys(delRes.deleted).length;
+          resourcesDeleted += count;
+          if (count > 0) {
+            console.log(`[Cloudinary Folder Prefix Delete] Deleted ${count} ${rType} assets with prefix: ${prefix}`);
+          }
+        }
+      } catch (err: any) {
+        if (!err?.message?.includes('not found') && !err?.message?.includes('404')) {
+          errors.push(`Prefix delete (${prefix} - ${rType}): ${err?.message || err}`);
+        }
+      }
+    }
+  }
+
+  // 3. Delete the folder itself
+  for (const f of [cleanFolder, cleanFolder.toLowerCase(), cleanFolder.toUpperCase()]) {
+    try {
+      const delFolderRes: any = await cloudinary.api.delete_folder(f);
+      if (delFolderRes && (delFolderRes.deleted || delFolderRes.result === 'ok')) {
+        folderDeleted = true;
+        console.log(`[Cloudinary Folder Delete SUCCESS] Folder deleted: ${f}`);
+      }
+    } catch (err: any) {
+      if (!err?.message?.includes('not found') && !err?.message?.includes('404')) {
+        errors.push(`Folder delete (${f}): ${err?.message || err}`);
+      }
+    }
+  }
+
+  return {
+    success: folderDeleted || resourcesDeleted > 0 || errors.length === 0,
+    folder: cleanFolder,
+    resourcesDeleted,
+    folderDeleted,
+    errors
+  };
+}
+
+// Thorough helper to purge all possible folders and files for a lesson
+async function purgeCloudinaryLessonAll(lessonId: string, additionalPublicIds: string[] = []): Promise<{
+  success: boolean;
+  lessonId: string;
+  totalAssetsDestroyed: number;
+  foldersPurged: string[];
+  errors: string[];
+}> {
+  const errors: string[] = [];
+  let totalAssetsDestroyed = 0;
+  const foldersPurged: string[] = [];
+
+  const safeLessonId = lessonId.trim();
+  if (!safeLessonId) {
+    return { success: true, lessonId: '', totalAssetsDestroyed: 0, foldersPurged: [], errors: [] };
+  }
+
+  // 1. Destroy individual assets if provided
+  if (additionalPublicIds.length > 0) {
+    const singleResults = await Promise.all(
+      additionalPublicIds.filter(Boolean).map(id => destroySingleCloudinaryAsset(id))
+    );
+    totalAssetsDestroyed += singleResults.filter(r => r.success).length;
+  }
+
+  // 2. Search and eradicate ALL assets matching lessonId across Cloudinary
+  try {
+    const searchExprs = [
+      `folder:"*${safeLessonId}*"`,
+      `public_id:"*${safeLessonId}*"`,
+      `asset_folder:"*${safeLessonId}*"`
+    ];
+    for (const expr of searchExprs) {
+      try {
+        const searchRes = await cloudinary.search.expression(expr).max_results(500).execute();
+        if (searchRes && searchRes.resources && searchRes.resources.length > 0) {
+          console.log(`[Cloudinary Lesson Purge Search] Found ${searchRes.resources.length} items for "${expr}"`);
+          const grouped: Record<string, string[]> = {};
+          searchRes.resources.forEach((r: any) => {
+            const t = r.resource_type || 'image';
+            if (!grouped[t]) grouped[t] = [];
+            grouped[t].push(r.public_id);
+          });
+
+          for (const [t, ids] of Object.entries(grouped)) {
+            for (let i = 0; i < ids.length; i += 100) {
+              const chunk = ids.slice(i, i + 100);
+              try {
+                const delRes: any = await cloudinary.api.delete_resources(chunk, {
+                  resource_type: t as any,
+                  invalidate: true
+                });
+                if (delRes && delRes.deleted) {
+                  totalAssetsDestroyed += Object.keys(delRes.deleted).length;
+                }
+              } catch {
+                const fallbacks = await Promise.all(chunk.map(id => destroySingleCloudinaryAsset(id, t)));
+                totalAssetsDestroyed += fallbacks.filter(f => f.success).length;
+              }
+            }
+          }
+        }
+      } catch {
+        // Continue
+      }
+    }
+  } catch (err: any) {
+    // Continue
+  }
+
+  // 3. Comprehensive list of potential folder paths for this lesson
+  const foldersToClean = [
+    `GDCT_V4/SLIDE/${safeLessonId}`,
+    `GDCT_V4/TAILIEU/${safeLessonId}`,
+    `GDCT_V4/VIDEOS/${safeLessonId}`,
+    `GDCT_V4/VIDEO/${safeLessonId}`,
+    `GDCT_V4/AUDIO/${safeLessonId}`,
+    `GDCT_V4/BANNERS/${safeLessonId}`,
+    `GDCT_V4/DOCUMENTS/${safeLessonId}`,
+    `GDCT_V4/PPTX/${safeLessonId}`,
+    `GDCT_V4/GENERAL/${safeLessonId}`,
+    `GDCT_V4/${safeLessonId}`,
+    `gdct_v4/slide/${safeLessonId}`,
+    `gdct_v4/tailieu/${safeLessonId}`,
+    `gdct_v4/videos/${safeLessonId}`,
+    `gdct_v4/audio/${safeLessonId}`,
+    `gdct_v4/${safeLessonId}`,
+    safeLessonId
+  ];
+
+  for (const folder of foldersToClean) {
+    const res = await destroyCloudinaryFolder(folder);
+    if (res.resourcesDeleted > 0 || res.folderDeleted) {
+      foldersPurged.push(folder);
+      totalAssetsDestroyed += res.resourcesDeleted;
+    }
+    if (res.errors.length > 0) {
+      errors.push(...res.errors);
+    }
+  }
+
+  return {
+    success: errors.length === 0 || totalAssetsDestroyed > 0 || foldersPurged.length > 0,
+    lessonId: safeLessonId,
+    totalAssetsDestroyed,
+    foldersPurged,
+    errors
+  };
 }
 
 const handleCloudinaryDelete = async (req: Request, res: Response) => {
@@ -3470,20 +3702,140 @@ const handleCloudinaryDelete = async (req: Request, res: Response) => {
 
     const singleResult = await destroySingleCloudinaryAsset(publicId as string, resourceType);
     return res.json({
-      success: true,
+      success: singleResult.success,
       provider: 'cloudinary',
       publicId,
       result: singleResult.result,
-      destroyed: singleResult.success
+      destroyed: singleResult.success,
+      error: singleResult.error
     });
   } catch (err: any) {
     console.warn('Cloudinary delete graceful warning:', err?.message || err);
-    return res.json({ success: true, provider: 'cloudinary', publicId, result: { result: 'not_found', warning: err?.message } });
+    return res.json({ success: false, provider: 'cloudinary', publicId, result: { result: 'error', warning: err?.message } });
   }
 };
 
 app.post('/api/cloudinary/delete', handleCloudinaryDelete);
 app.delete('/api/cloudinary/delete', handleCloudinaryDelete);
+
+// Endpoint to delete an entire Cloudinary folder
+app.post('/api/cloudinary/delete-folder', async (req: Request, res: Response) => {
+  const folder = req.body?.folder || req.body?.folderPath || req.query?.folder;
+  if (!folder) {
+    return res.status(400).json({ success: false, message: 'folder hoặc folderPath là bắt buộc' });
+  }
+
+  const isConfigured = configureCloudinary();
+  if (!isConfigured) {
+    return res.status(500).json({ success: false, message: 'Cloudinary credentials chưa được thiết lập' });
+  }
+
+  try {
+    const result = await destroyCloudinaryFolder(String(folder));
+    return res.json({
+      success: result.success,
+      folder: result.folder,
+      resourcesDeleted: result.resourcesDeleted,
+      folderDeleted: result.folderDeleted,
+      errors: result.errors
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'Lỗi khi xóa folder Cloudinary' });
+  }
+});
+
+// Endpoint to purge all assets and folders belonging to a lesson
+app.post('/api/cloudinary/purge-lesson', async (req: Request, res: Response) => {
+  const lessonId = req.body?.lessonId || req.query?.lessonId;
+  const publicIds = req.body?.publicIds || [];
+
+  if (!lessonId) {
+    return res.status(400).json({ success: false, message: 'lessonId là bắt buộc' });
+  }
+
+  const isConfigured = configureCloudinary();
+  if (!isConfigured) {
+    return res.json({ success: true, message: 'Cloudinary credentials chưa được thiết lập, bỏ qua purge' });
+  }
+
+  try {
+    const result = await purgeCloudinaryLessonAll(String(lessonId), Array.isArray(publicIds) ? publicIds : [publicIds]);
+    return res.json({
+      success: result.success,
+      lessonId: result.lessonId,
+      totalAssetsDestroyed: result.totalAssetsDestroyed,
+      foldersPurged: result.foldersPurged,
+      errors: result.errors
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'Lỗi khi purge lesson Cloudinary' });
+  }
+});
+
+// Endpoint to purge all assets and folders for a course and its child lessons
+app.post('/api/cloudinary/purge-course', async (req: Request, res: Response) => {
+  const courseId = req.body?.courseId || req.query?.courseId;
+  const lessonIds: string[] = req.body?.lessonIds || [];
+  const publicIds: string[] = req.body?.publicIds || [];
+
+  if (!courseId) {
+    return res.status(400).json({ success: false, message: 'courseId là bắt buộc' });
+  }
+
+  const isConfigured = configureCloudinary();
+  if (!isConfigured) {
+    return res.json({ success: true, message: 'Cloudinary credentials chưa được thiết lập, bỏ qua purge' });
+  }
+
+  try {
+    let totalAssetsDestroyed = 0;
+    const foldersPurged: string[] = [];
+    const allErrors: string[] = [];
+
+    // 1. Purge course-level folders
+    const courseFolders = [
+      `GDCT_V4/BANNERS/${courseId}`,
+      `GDCT_V4/COURSES/${courseId}`,
+      `GDCT_V4/${courseId}`,
+      `gdct_v4/banners/${courseId}`,
+      `gdct_v4/${courseId}`,
+      courseId
+    ];
+
+    for (const f of courseFolders) {
+      const resFold = await destroyCloudinaryFolder(f);
+      if (resFold.resourcesDeleted > 0 || resFold.folderDeleted) {
+        foldersPurged.push(f);
+        totalAssetsDestroyed += resFold.resourcesDeleted;
+      }
+      if (resFold.errors.length > 0) allErrors.push(...resFold.errors);
+    }
+
+    // 2. Destroy explicit public IDs
+    if (publicIds.length > 0) {
+      const singleResults = await Promise.all(publicIds.map(id => destroySingleCloudinaryAsset(id)));
+      totalAssetsDestroyed += singleResults.filter(r => r.success).length;
+    }
+
+    // 3. Purge all child lessons
+    for (const lId of lessonIds) {
+      const lRes = await purgeCloudinaryLessonAll(lId);
+      totalAssetsDestroyed += lRes.totalAssetsDestroyed;
+      foldersPurged.push(...lRes.foldersPurged);
+      if (lRes.errors.length > 0) allErrors.push(...lRes.errors);
+    }
+
+    return res.json({
+      success: true,
+      courseId,
+      totalAssetsDestroyed,
+      foldersPurged: Array.from(new Set(foldersPurged)),
+      errors: allErrors
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err?.message || 'Lỗi khi purge course Cloudinary' });
+  }
+});
 
 app.post('/api/cloudinary/signature', (req: Request, res: Response) => {
   const isConfigured = configureCloudinary();

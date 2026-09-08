@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   LayoutDashboard, 
   BookOpen, 
+  FileSpreadsheet,
   Users, 
   Building2, 
   TrendingUp, 
@@ -10,11 +11,13 @@ import {
   Shield,
   ShieldCheck,
   Layers,
-  Image as ImageIcon
+  Image as ImageIcon,
+  MessageSquareText,
+  LogOut
 } from 'lucide-react';
 import { DongSonDrum, DongSonBorder } from './DongSonMotif';
 
-export type NavTab = 'dashboard' | 'courses' | 'users' | 'units' | 'banners' | 'progress' | 'notifications' | 'settings' | 'firebase-diagnostics';
+export type NavTab = 'dashboard' | 'courses' | 'exams' | 'feedbacks' | 'users' | 'units' | 'banners' | 'progress' | 'notifications' | 'settings' | 'firebase-diagnostics';
 
 export interface SidebarProps {
   activeTab: NavTab | string;
@@ -26,6 +29,7 @@ export interface SidebarProps {
     totalLessons: number;
     unreadNotifs?: number;
   };
+  onLogout?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ 
@@ -33,7 +37,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab, 
   onSelectTab,
   trashCount = 0,
-  stats 
+  stats,
+  onLogout
 }) => {
   const handleTabClick = (tabId: NavTab) => {
     if (onSelectTab) {
@@ -55,6 +60,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'GIÁO DỤC CHÍNH TRỊ',
       icon: BookOpen,
       badge: null,
+    },
+    {
+      id: 'exams' as NavTab,
+      label: 'ĐỀ KIỂM TRA EXCEL',
+      icon: FileSpreadsheet,
+      badge: 'MỚI',
+    },
+    {
+      id: 'feedbacks' as NavTab,
+      label: 'PHẢN ÁNH & GÓP Ý',
+      icon: MessageSquareText,
+      badge: 'PHẢN HỒI',
     },
     {
       id: 'users' as NavTab,
@@ -195,14 +212,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <DongSonBorder color="#F59E0B" className="h-1.5 opacity-30" />
 
       {/* Footer / App Info */}
-      <div className="p-4 bg-slate-950/50 border-t border-slate-800 relative z-10 text-xs">
-        <div className="flex items-center space-x-2 text-amber-300 mb-1">
-          <Layers className="w-3.5 h-3.5 text-amber-400" />
-          <span className="font-bold text-[11px]">GIÁO DỤC CHÍNH TRỊ HQV4</span>
+      <div className="p-4 bg-slate-950/50 border-t border-slate-800 relative z-10 text-xs space-y-3">
+        <div>
+          <div className="flex items-center space-x-2 text-amber-300 mb-1">
+            <Layers className="w-3.5 h-3.5 text-amber-400" />
+            <span className="font-bold text-[11px]">GIÁO DỤC CHÍNH TRỊ HQV4</span>
+          </div>
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            Đồng bộ trực tuyến sẵn sàng kết nối ứng dụng học tập chiến sĩ.
+          </p>
         </div>
-        <p className="text-[10px] text-slate-400 leading-relaxed">
-          Đồng bộ trực tuyến sẵn sàng kết nối ứng dụng học tập chiến sĩ.
-        </p>
+
+        {onLogout && (
+          <button
+            id="sidebar-logout-btn"
+            onClick={onLogout}
+            className="w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-xl bg-slate-900/90 hover:bg-rose-950/50 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-700/60 text-xs font-semibold transition-all"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Đăng xuất quản trị</span>
+          </button>
+        )}
       </div>
     </aside>
   );

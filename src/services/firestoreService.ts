@@ -1,5 +1,8 @@
 import {
   db,
+  storage,
+  ref,
+  deleteObject,
   collection,
   doc,
   getDoc,
@@ -39,8 +42,17 @@ import {
   SourceDocument,
   UserItemProgress,
   UserSectionProgress,
-  AppBanner
+  AppBanner,
+  ExamBank,
+  ExamQuestion,
+  ExamSession,
+  ExamSubmission
 } from '../types';
+import { 
+  isFixedCourse, 
+  FIXED_COURSES_DEFINITIONS, 
+  getFixedCourseCategory 
+} from '../utils/fixedCourses';
 
 // =============================================================
 // PRODUCTION FIRESTORE DATA SERVICE
@@ -84,6 +96,66 @@ export const firestoreService = {
   // -------------------------------------------------------------
   // COURSES (CHUYÊN ĐỀ)
   // -------------------------------------------------------------
+  ensureFixedCourses: async (): Promise<Course[]> => {
+    try {
+      const colRef = collection(db, 'courses');
+      const snap = await getDocs(colRef);
+      const existingCourses = snap.docs.map(d => d.data() as Course);
+      const now = new Date().toISOString();
+      const batch = writeBatch(db);
+      let needsCommit = false;
+
+      for (const def of FIXED_COURSES_DEFINITIONS) {
+        const found = existingCourses.find(c => c.id === def.id || c.code === def.code || c.categoryKey === def.categoryKey);
+        if (found) {
+          // If exists, make sure isDeleted is false and categoryKey is set. Respect user's explicit isFixed setting.
+          if (found.isDeleted === true || !found.categoryKey || found.isFixed === undefined) {
+            const ref = doc(db, 'courses', found.id);
+            batch.update(ref, {
+              isFixed: found.isFixed !== undefined ? found.isFixed : true,
+              isDeleted: false,
+              categoryKey: found.categoryKey || def.categoryKey,
+              code: found.code || def.code,
+              updatedAt: now
+            });
+            needsCommit = true;
+          }
+        } else {
+          // If missing completely, initialize this fixed course
+          const ref = doc(db, 'courses', def.id);
+          const newFixedCourse: Course = {
+            id: def.id,
+            code: def.code,
+            title: def.title,
+            description: def.description,
+            thumbnail: def.thumbnail,
+            storageThumbnailPath: def.storageThumbnailPath,
+            year: def.year,
+            order: def.order,
+            status: def.status,
+            version: 1,
+            isDeleted: false,
+            isFixed: true,
+            categoryKey: def.categoryKey,
+            createdBy: def.createdBy,
+            createdAt: now,
+            updatedAt: now
+          };
+          batch.set(ref, newFixedCourse);
+          needsCommit = true;
+        }
+      }
+
+      if (needsCommit) {
+        await batch.commit();
+      }
+    } catch (err) {
+      console.warn('[ensureFixedCourses warning]:', err);
+    }
+
+    return firestoreService.getCourses(false);
+  },
+
   getCourses: async (includeDeleted = false, maxLimit = 100): Promise<Course[]> => {
     const colRef = collection(db, 'courses');
     let q;
@@ -93,14 +165,30 @@ export const firestoreService = {
       q = query(colRef, where('isDeleted', '==', false), limit(maxLimit));
     }
     const snap = await getDocs(q);
-    const courses = snap.docs.map(d => d.data() as Course);
+    const courses = snap.docs.map(d => {
+      const data = d.data() as Course;
+      const isFixed = data.isFixed !== undefined ? data.isFixed : isFixedCourse(data);
+      const catDef = getFixedCourseCategory(data);
+      return {
+        ...data,
+        isFixed,
+        categoryKey: data.categoryKey || catDef?.categoryKey
+      } as Course;
+    });
     return courses.sort((a, b) => (a.order || 0) - (b.order || 0));
   },
 
   getCourse: async (id: string): Promise<Course | null> => {
     const docRef = doc(db, 'courses', id);
     const snap = await getDoc(docRef);
-    return snap.exists() ? (snap.data() as Course) : null;
+    if (!snap.exists()) return null;
+    const data = snap.data() as Course;
+    const isFixed = data.isFixed !== undefined ? data.isFixed : isFixedCourse(data);
+    return {
+      ...data,
+      isFixed,
+      categoryKey: data.categoryKey || getFixedCourseCategory(data)?.categoryKey
+    };
   },
 
   createCourse: async (data: Partial<Course>): Promise<Course> => {
@@ -122,6 +210,8 @@ export const firestoreService = {
       status: data.status || 'DRAFT',
       version: data.version || 1,
       isDeleted: false,
+      isFixed: data.isFixed !== undefined ? data.isFixed : isFixedCourse({ id, code, title: data.title }),
+      categoryKey: data.categoryKey,
       createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
       createdAt: now,
       updatedAt: now
@@ -134,24 +224,38 @@ export const firestoreService = {
     const docRef = doc(db, 'courses', id);
     const existing = await getDoc(docRef);
     if (!existing.exists()) throw new Error(`Không tìm thấy chuyên đề ${id}`);
+    const existingData = existing.data() as Course;
+    const isFixed = data.isFixed !== undefined 
+      ? data.isFixed 
+      : (existingData.isFixed !== undefined ? existingData.isFixed : isFixedCourse(existingData));
     
     const now = new Date().toISOString();
-    const updatePayload = {
+    const updatePayload = sanitizeFirestoreData({
       ...data,
-      version: ((existing.data() as Course).version || 1) + 1,
+      isFixed,
+      version: (existingData.version || 1) + 1,
       updatedAt: now
-    };
+    });
     await updateDoc(docRef, updatePayload);
     const updatedSnap = await getDoc(docRef);
     return updatedSnap.data() as Course;
   },
 
   deleteCourse: async (id: string, permanent = false): Promise<{ success: boolean; message: string }> => {
+    const docRef = doc(db, 'courses', id);
+    const existing = await getDoc(docRef);
+    if (existing.exists()) {
+      const courseData = existing.data() as Course;
+      const isFixed = courseData.isFixed !== undefined ? courseData.isFixed : isFixedCourse(courseData);
+      if (isFixed) {
+        throw new Error(`Không thể xóa chuyên đề "${courseData.title}". Đây là chuyên đề cố định của hệ thống đồng bộ với tiện ích App! Vui lòng bỏ chọn Khóa cố định trước khi xóa.`);
+      }
+    }
+
     if (permanent) {
       const res = await firestoreService.deleteCourseCascade(id);
       return { success: res.success, message: res.message };
     } else {
-      const docRef = doc(db, 'courses', id);
       await updateDoc(docRef, {
         isDeleted: true,
         updatedAt: new Date().toISOString()
@@ -178,7 +282,16 @@ export const firestoreService = {
       : query(colRef, where('isDeleted', '==', false));
     
     return onSnapshot(q, (snapshot) => {
-      const courses = snapshot.docs.map(doc => doc.data() as Course);
+      const courses = snapshot.docs.map(doc => {
+        const data = doc.data() as Course;
+        const isFixed = data.isFixed !== undefined ? data.isFixed : isFixedCourse(data);
+        const catDef = getFixedCourseCategory(data);
+        return {
+          ...data,
+          isFixed,
+          categoryKey: data.categoryKey || catDef?.categoryKey
+        } as Course;
+      });
       courses.sort((a, b) => (a.order || 0) - (b.order || 0));
       callback(courses);
     }, (err) => {
@@ -458,10 +571,22 @@ export const firestoreService = {
       if (data.storagePath) targets.push(data.storagePath);
       if (data.imageUrl) targets.push(data.imageUrl);
       if (data.secureUrl) targets.push(data.secureUrl);
+      if (data.cloudinaryUrl) targets.push(data.cloudinaryUrl);
     });
 
     if (targets.length > 0) {
-      await deleteCloudinaryAssetsHelper(targets, 'image');
+      deleteUnifiedAssetsHelper(targets, 'image').catch(err => {
+        console.warn('deleteUnifiedAssetsHelper error in deleteSlideSet:', err);
+      });
+    }
+
+    // Also trigger thorough Cloudinary folder and search purge for lesson slide folder
+    if (lessonId) {
+      purgeCloudinaryLessonHelper(lessonId, targets).catch(err => {
+        console.warn('purgeCloudinaryLessonHelper error in deleteSlideSet:', err);
+      });
+      deleteCloudinaryFolderHelper(`GDCT_V4/SLIDE/${lessonId}`).catch(() => {});
+      deleteCloudinaryFolderHelper(`gdct_v4/slide/${lessonId}`).catch(() => {});
     }
 
     const batch = writeBatch(db);
@@ -807,13 +932,18 @@ export const firestoreService = {
     const snap = await getDoc(docRef);
     if (snap.exists()) {
       const data = snap.data() as LessonItem;
-      const htmlUrls = [
+      const htmlUrls: string[] = [
         ...extractCloudinaryUrlsFromHtml(data.bodyHtml),
+        ...extractFirebaseStorageUrlsFromHtml(data.bodyHtml),
         ...extractCloudinaryUrlsFromHtml(data.content),
-        ...(data.paragraphs || []).flatMap(p => extractCloudinaryUrlsFromHtml(p))
+        ...extractFirebaseStorageUrlsFromHtml(data.content),
+        ...(data.paragraphs || []).flatMap(p => [
+          ...extractCloudinaryUrlsFromHtml(p),
+          ...extractFirebaseStorageUrlsFromHtml(p)
+        ])
       ];
       if (htmlUrls.length > 0) {
-        await deleteCloudinaryAssetsHelper(htmlUrls, 'image');
+        await deleteUnifiedAssetsHelper(htmlUrls, 'image');
       }
     }
     
@@ -838,9 +968,12 @@ export const firestoreService = {
     const contentSnap = await getDoc(contentRef);
     if (contentSnap.exists()) {
       const data = contentSnap.data() as ContentSection;
-      const htmlUrls = extractCloudinaryUrlsFromHtml(data.bodyHtml);
+      const htmlUrls = [
+        ...extractCloudinaryUrlsFromHtml(data.bodyHtml),
+        ...extractFirebaseStorageUrlsFromHtml(data.bodyHtml)
+      ];
       if (htmlUrls.length > 0) {
-        await deleteCloudinaryAssetsHelper(htmlUrls, 'image');
+        await deleteUnifiedAssetsHelper(htmlUrls, 'image');
       }
       await deleteDoc(contentRef);
       return { success: true };
@@ -856,16 +989,21 @@ export const firestoreService = {
     const itemsCol = collection(db, 'items');
     const itemsSnap = await getDocs(query(itemsCol, where('sectionId', '==', sectionId)));
 
-    // Clean up any Cloudinary assets in items
+    // Clean up any storage assets in items
     const htmlUrls: string[] = [];
     itemsSnap.docs.forEach(d => {
       const item = d.data() as LessonItem;
       htmlUrls.push(...extractCloudinaryUrlsFromHtml(item.bodyHtml));
+      htmlUrls.push(...extractFirebaseStorageUrlsFromHtml(item.bodyHtml));
       htmlUrls.push(...extractCloudinaryUrlsFromHtml(item.content));
-      (item.paragraphs || []).forEach(p => htmlUrls.push(...extractCloudinaryUrlsFromHtml(p)));
+      htmlUrls.push(...extractFirebaseStorageUrlsFromHtml(item.content));
+      (item.paragraphs || []).forEach(p => {
+        htmlUrls.push(...extractCloudinaryUrlsFromHtml(p));
+        htmlUrls.push(...extractFirebaseStorageUrlsFromHtml(p));
+      });
     });
     if (htmlUrls.length > 0) {
-      await deleteCloudinaryAssetsHelper(htmlUrls, 'image');
+      await deleteUnifiedAssetsHelper(htmlUrls, 'image');
     }
 
     const batch = writeBatch(db);
@@ -913,20 +1051,26 @@ export const firestoreService = {
       const questionsSnap = await getDocs(query(collection(db, 'questions'), where('lessonId', '==', lessonId)));
       const contentsSnap = await getDocs(query(collection(db, 'contents'), where('lessonId', '==', lessonId)));
 
-      // Clean up Cloudinary assets in all contents & items
+      // Clean up assets in all contents & items
       const htmlUrls: string[] = [];
       contentsSnap.docs.forEach(d => {
         const c = d.data() as ContentSection;
         htmlUrls.push(...extractCloudinaryUrlsFromHtml(c.bodyHtml));
+        htmlUrls.push(...extractFirebaseStorageUrlsFromHtml(c.bodyHtml));
       });
       itemsSnap.docs.forEach(d => {
         const item = d.data() as LessonItem;
         htmlUrls.push(...extractCloudinaryUrlsFromHtml(item.bodyHtml));
+        htmlUrls.push(...extractFirebaseStorageUrlsFromHtml(item.bodyHtml));
         htmlUrls.push(...extractCloudinaryUrlsFromHtml(item.content));
-        (item.paragraphs || []).forEach(p => htmlUrls.push(...extractCloudinaryUrlsFromHtml(p)));
+        htmlUrls.push(...extractFirebaseStorageUrlsFromHtml(item.content));
+        (item.paragraphs || []).forEach(p => {
+          htmlUrls.push(...extractCloudinaryUrlsFromHtml(p));
+          htmlUrls.push(...extractFirebaseStorageUrlsFromHtml(p));
+        });
       });
       if (htmlUrls.length > 0) {
-        await deleteCloudinaryAssetsHelper(htmlUrls, 'image');
+        await deleteUnifiedAssetsHelper(htmlUrls, 'image');
       }
 
       const batch = writeBatch(db);
@@ -1061,14 +1205,18 @@ export const firestoreService = {
 
   deleteSourceDocumentCascade: async (lessonId: string, documentId: string, cloudinaryPublicId?: string, resourceType = 'raw'): Promise<{ success: boolean; message: string; cloudinaryDeleted: boolean }> => {
     try {
-      // 1. First run the same content cleanup to remove sections, items, questions, and progress linked to documentId
+      // 1. Fetch document metadata before deletion to get all file paths/URLs
+      const docRef = doc(db, 'documents', documentId);
+      const docSnap = await getDoc(docRef);
+      const docData = docSnap.exists() ? (docSnap.data() as SourceDocument) : null;
+
+      // 2. First run the same content cleanup to remove sections, items, questions, and progress linked to documentId
       await firestoreService.deleteDocumentContentOnly(lessonId, documentId);
 
-      // 2. Delete document metadata from Firestore
-      const docRef = doc(db, 'documents', documentId);
+      // 3. Delete document metadata from Firestore
       await deleteDoc(docRef);
 
-      // 3. Update remaining source documents on lesson
+      // 4. Update remaining source documents on lesson
       const lessonRef = doc(db, 'lessons', lessonId);
       const remainingDocs = await firestoreService.getSourceDocuments(lessonId);
       await updateDoc(lessonRef, {
@@ -1079,36 +1227,24 @@ export const firestoreService = {
         updatedAt: new Date().toISOString()
       });
 
-      // 4. Delete Cloudinary file if publicId exists
-      let cloudinaryDeleted = true;
-      if (cloudinaryPublicId) {
-        try {
-          const resp = await fetch('/api/cloudinary/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ publicId: cloudinaryPublicId, resourceType })
-          });
-          const json = await resp.json();
-          if (!json.success) {
-            cloudinaryDeleted = false;
-          }
-        } catch (cloudErr) {
-          console.warn('Cloudinary delete request failed:', cloudErr);
-          cloudinaryDeleted = false;
-        }
-      }
+      // 5. Delete storage file across Cloudinary and Firebase Storage
+      const targets = [
+        cloudinaryPublicId,
+        docData?.cloudinaryPublicId,
+        docData?.storagePath,
+        docData?.url,
+        (docData as any)?.secureUrl
+      ].filter(Boolean) as string[];
 
-      if (!cloudinaryDeleted) {
-        return {
-          success: true,
-          cloudinaryDeleted: false,
-          message: 'Đã xóa nội dung và metadata tài liệu nhưng chưa xóa được file Cloudinary. Vui lòng thử lại.'
-        };
+      let deleteRes = { cloudinary: true, firebase: true };
+      if (targets.length > 0) {
+        const inferredType = (docData?.resourceType as any) || (resourceType as any) || 'raw';
+        deleteRes = await deleteUnifiedAssetsHelper(targets, inferredType);
       }
 
       return {
         success: true,
-        cloudinaryDeleted: true,
+        cloudinaryDeleted: deleteRes.cloudinary && deleteRes.firebase,
         message: 'Đã xóa tài liệu và toàn bộ dữ liệu bài học liên quan thành công.'
       };
     } catch (err: any) {
@@ -1539,18 +1675,14 @@ export const firestoreService = {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const data = snap.data() as AppBanner;
-        // Cascade delete Cloudinary asset if present
-        try {
-          if (data.cloudinaryPublicId) {
-            await deleteCloudinaryAssetsHelper([data.cloudinaryPublicId], 'image');
-          } else if (data.imageUrl && data.imageUrl.includes('cloudinary.com')) {
-            const publicIdMatch = data.imageUrl.match(/\/upload\/(?:v\d+\/)?([^\.]+)/);
-            if (publicIdMatch && publicIdMatch[1]) {
-              await deleteCloudinaryAssetsHelper([publicIdMatch[1]], 'image');
-            }
-          }
-        } catch (cErr) {
-          console.warn('Cloudinary delete error during banner removal:', cErr);
+        const targets = [
+          data.cloudinaryPublicId,
+          (data as any).storagePath,
+          data.imageUrl
+        ].filter(Boolean) as string[];
+
+        if (targets.length > 0) {
+          await deleteUnifiedAssetsHelper(targets, 'image');
         }
       }
     } catch (err) {
@@ -1747,7 +1879,7 @@ export const firestoreService = {
   deleteSlideCascade: async (slideId: string): Promise<{ success: boolean; cloudinaryDeleted: boolean }> => {
     const docRef = doc(db, 'slides', slideId);
     const snap = await getDoc(docRef);
-    let cloudinaryDeleted = true;
+    let allDeleted = true;
     if (snap.exists()) {
       const data = snap.data() as SlideItem;
       const lessonId = data.lessonId;
@@ -1759,7 +1891,8 @@ export const firestoreService = {
         data.cloudinaryUrl
       ].filter(Boolean) as string[];
       if (targets.length > 0) {
-        cloudinaryDeleted = await deleteCloudinaryAssetsHelper(targets, 'image');
+        const res = await deleteUnifiedAssetsHelper(targets, 'image');
+        allDeleted = res.cloudinary && res.firebase;
       }
       await deleteDoc(docRef);
       if (lessonId) {
@@ -1769,22 +1902,24 @@ export const firestoreService = {
         } catch {}
       }
     }
-    return { success: true, cloudinaryDeleted };
+    return { success: true, cloudinaryDeleted: allDeleted };
   },
 
   deleteVideoCascade: async (videoId: string, lessonIdParam?: string): Promise<{ success: boolean; cloudinaryDeleted: boolean }> => {
     const docRef = doc(db, 'videos', videoId);
     const snap = await getDoc(docRef);
-    let cloudinaryDeleted = true;
+    let allDeleted = true;
     if (snap.exists()) {
       const data = snap.data() as VideoItem;
       const lessonId = data.lessonId || lessonIdParam;
       const videoTargets = [data.cloudinaryPublicId, data.storagePath, data.videoUrl, (data as any).cloudinaryUrl].filter(Boolean) as string[];
       if (videoTargets.length > 0) {
-        cloudinaryDeleted = await deleteCloudinaryAssetsHelper(videoTargets, 'video');
+        const res = await deleteUnifiedAssetsHelper(videoTargets, 'video');
+        if (!res.cloudinary || !res.firebase) allDeleted = false;
       }
-      if (data.thumbnail && data.thumbnail.includes('cloudinary.com')) {
-        await deleteCloudinaryAssetHelper(data.thumbnail, 'image');
+      if (data.thumbnail) {
+        const res = await deleteUnifiedAssetHelper(data.thumbnail, 'image');
+        if (!res.cloudinary || !res.firebase) allDeleted = false;
       }
       await deleteDoc(docRef);
       if (lessonId) {
@@ -1794,19 +1929,20 @@ export const firestoreService = {
         } catch {}
       }
     }
-    return { success: true, cloudinaryDeleted };
+    return { success: true, cloudinaryDeleted: allDeleted };
   },
 
   deleteAudioCascade: async (audioId: string, lessonIdParam?: string): Promise<{ success: boolean; cloudinaryDeleted: boolean }> => {
     const docRef = doc(db, 'audios', audioId);
     const snap = await getDoc(docRef);
-    let cloudinaryDeleted = true;
+    let allDeleted = true;
     if (snap.exists()) {
       const data = snap.data() as AudioItem;
       const lessonId = data.lessonId || lessonIdParam;
       const audioTargets = [data.cloudinaryPublicId, data.storagePath, data.audioUrl, (data as any).cloudinaryUrl].filter(Boolean) as string[];
       if (audioTargets.length > 0) {
-        cloudinaryDeleted = await deleteCloudinaryAssetsHelper(audioTargets, 'video');
+        const res = await deleteUnifiedAssetsHelper(audioTargets, 'video');
+        allDeleted = res.cloudinary && res.firebase;
       }
       await deleteDoc(docRef);
       if (lessonId) {
@@ -1816,7 +1952,7 @@ export const firestoreService = {
         } catch {}
       }
     }
-    return { success: true, cloudinaryDeleted };
+    return { success: true, cloudinaryDeleted: allDeleted };
   },
 
   deleteLessonCascade: async (lessonId: string): Promise<DeleteReport> => {
@@ -1837,7 +1973,9 @@ export const firestoreService = {
         documentsSnap,
         itemProgSnap,
         secProgSnap,
-        progressSnap
+        progressSnap,
+        pptxJobsSnap,
+        mediaFilesSnap
       ] = await Promise.all([
         getDocs(query(collection(db, 'contents'), where('lessonId', '==', lessonId))),
         getDocs(query(collection(db, 'sections'), where('lessonId', '==', lessonId))),
@@ -1850,19 +1988,27 @@ export const firestoreService = {
         getDocs(query(collection(db, 'documents'), where('lessonId', '==', lessonId))),
         getDocs(query(collection(db, 'itemProgress'), where('lessonId', '==', lessonId))),
         getDocs(query(collection(db, 'userSectionProgress'), where('lessonId', '==', lessonId))),
-        getDocs(query(collection(db, 'progress'), where('lessonId', '==', lessonId)))
+        getDocs(query(collection(db, 'progress'), where('lessonId', '==', lessonId))),
+        getDocs(query(collection(db, 'pptxJobs'), where('lessonId', '==', lessonId))).catch(() => ({ docs: [], size: 0 } as any)),
+        getDocs(query(collection(db, 'mediaFiles'), where('lessonId', '==', lessonId))).catch(() => ({ docs: [], size: 0 } as any))
       ]);
 
-      const cloudinaryImageTargets: string[] = [];
-      const cloudinaryVideoTargets: string[] = [];
-      const cloudinaryRawTargets: string[] = [];
+      const imageTargets: string[] = [];
+      const videoTargets: string[] = [];
+      const rawTargets: string[] = [];
 
-      // 1. Lesson thumbnail
+      // 1. Lesson thumbnail & PPT storage path
       if (lessonData?.storageThumbnailPath) {
-        cloudinaryImageTargets.push(lessonData.storageThumbnailPath);
+        imageTargets.push(lessonData.storageThumbnailPath);
       }
-      if (lessonData?.thumbnail && lessonData.thumbnail.includes('cloudinary.com')) {
-        cloudinaryImageTargets.push(lessonData.thumbnail);
+      if (lessonData?.thumbnail) {
+        imageTargets.push(lessonData.thumbnail);
+      }
+      if (lessonData?.rawPptStoragePath) {
+        rawTargets.push(lessonData.rawPptStoragePath);
+      }
+      if ((lessonData as any)?.storagePath) {
+        rawTargets.push((lessonData as any).storagePath);
       }
 
       // 2. Slide images
@@ -1870,7 +2016,7 @@ export const firestoreService = {
         const slide = d.data() as SlideItem;
         [slide.cloudinaryPublicId, slide.storagePath, slide.imageUrl, slide.secureUrl, slide.cloudinaryUrl]
           .filter(Boolean)
-          .forEach(id => cloudinaryImageTargets.push(id!));
+          .forEach(id => imageTargets.push(id!));
       });
 
       // 3. Videos & video thumbnails
@@ -1878,9 +2024,9 @@ export const firestoreService = {
         const video = d.data() as VideoItem;
         [video.cloudinaryPublicId, video.storagePath, video.videoUrl, (video as any).cloudinaryUrl]
           .filter(Boolean)
-          .forEach(id => cloudinaryVideoTargets.push(id!));
-        if (video.thumbnail && video.thumbnail.includes('cloudinary.com')) {
-          cloudinaryImageTargets.push(video.thumbnail);
+          .forEach(id => videoTargets.push(id!));
+        if (video.thumbnail) {
+          imageTargets.push(video.thumbnail);
         }
       });
 
@@ -1889,7 +2035,7 @@ export const firestoreService = {
         const audio = d.data() as AudioItem;
         [audio.cloudinaryPublicId, audio.storagePath, audio.audioUrl, (audio as any).cloudinaryUrl]
           .filter(Boolean)
-          .forEach(id => cloudinaryVideoTargets.push(id!));
+          .forEach(id => videoTargets.push(id!));
       });
 
       // 5. Documents
@@ -1898,56 +2044,71 @@ export const firestoreService = {
         const resType = docItem.resourceType || 'raw';
         const docTargets = [docItem.cloudinaryPublicId, docItem.storagePath, docItem.url, (docItem as any).secureUrl].filter(Boolean) as string[];
         if (resType === 'image') {
-          docTargets.forEach(t => cloudinaryImageTargets.push(t));
+          docTargets.forEach(t => imageTargets.push(t));
         } else if (resType === 'video') {
-          docTargets.forEach(t => cloudinaryVideoTargets.push(t));
+          docTargets.forEach(t => videoTargets.push(t));
         } else {
-          docTargets.forEach(t => cloudinaryRawTargets.push(t));
+          docTargets.forEach(t => rawTargets.push(t));
         }
       });
 
-      // 6. Embedded images in content and items
+      // 6. Embedded images in content and items (Cloudinary & Firebase Storage)
       contentsSnap.docs.forEach(d => {
         const c = d.data() as ContentSection;
-        extractCloudinaryUrlsFromHtml(c.bodyHtml).forEach(u => cloudinaryImageTargets.push(u));
+        extractCloudinaryUrlsFromHtml(c.bodyHtml).forEach(u => imageTargets.push(u));
+        extractFirebaseStorageUrlsFromHtml(c.bodyHtml).forEach(u => imageTargets.push(u));
       });
 
       itemsSnap.docs.forEach(d => {
         const item = d.data() as LessonItem;
-        extractCloudinaryUrlsFromHtml(item.bodyHtml).forEach(u => cloudinaryImageTargets.push(u));
-        extractCloudinaryUrlsFromHtml(item.content).forEach(u => cloudinaryImageTargets.push(u));
+        extractCloudinaryUrlsFromHtml(item.bodyHtml).forEach(u => imageTargets.push(u));
+        extractFirebaseStorageUrlsFromHtml(item.bodyHtml).forEach(u => imageTargets.push(u));
+        extractCloudinaryUrlsFromHtml(item.content).forEach(u => imageTargets.push(u));
+        extractFirebaseStorageUrlsFromHtml(item.content).forEach(u => imageTargets.push(u));
         (item.paragraphs || []).forEach(p => {
-          extractCloudinaryUrlsFromHtml(p).forEach(u => cloudinaryImageTargets.push(u));
+          extractCloudinaryUrlsFromHtml(p).forEach(u => imageTargets.push(u));
+          extractFirebaseStorageUrlsFromHtml(p).forEach(u => imageTargets.push(u));
         });
       });
 
-      const uniqueImages = Array.from(new Set(cloudinaryImageTargets.filter(Boolean)));
-      const uniqueVideos = Array.from(new Set(cloudinaryVideoTargets.filter(Boolean)));
-      const uniqueRaws = Array.from(new Set(cloudinaryRawTargets.filter(Boolean)));
-      const cloudinaryTotalCount = uniqueImages.length + uniqueVideos.length + uniqueRaws.length;
+      // 7. PPTX Jobs & MediaFiles storage paths
+      pptxJobsSnap.docs.forEach((d: any) => {
+        const job = d.data();
+        if (job?.rawPptStoragePath) rawTargets.push(job.rawPptStoragePath);
+        if (job?.storagePath) rawTargets.push(job.storagePath);
+      });
+      mediaFilesSnap.docs.forEach((d: any) => {
+        const media = d.data();
+        if (media?.storagePath) rawTargets.push(media.storagePath);
+        if (media?.url) imageTargets.push(media.url);
+      });
 
-      let cloudinarySuccessCount = 0;
-      const cloudinaryBatches: Promise<boolean>[] = [];
+      const uniqueImages = Array.from(new Set(imageTargets.filter(Boolean)));
+      const uniqueVideos = Array.from(new Set(videoTargets.filter(Boolean)));
+      const uniqueRaws = Array.from(new Set(rawTargets.filter(Boolean)));
+      const totalStorageTargetsCount = uniqueImages.length + uniqueVideos.length + uniqueRaws.length;
 
+      // Execute unified multi-storage deletion (Cloudinary + Firebase Storage)
+      const deletePromises: Promise<{ cloudinary: boolean; firebase: boolean }>[] = [];
       if (uniqueImages.length > 0) {
-        cloudinaryBatches.push(deleteCloudinaryAssetsHelper(uniqueImages, 'image'));
+        deletePromises.push(deleteUnifiedAssetsHelper(uniqueImages, 'image'));
       }
       if (uniqueVideos.length > 0) {
-        cloudinaryBatches.push(deleteCloudinaryAssetsHelper(uniqueVideos, 'video'));
+        deletePromises.push(deleteUnifiedAssetsHelper(uniqueVideos, 'video'));
       }
       if (uniqueRaws.length > 0) {
-        cloudinaryBatches.push(deleteCloudinaryAssetsHelper(uniqueRaws, 'raw'));
+        deletePromises.push(deleteUnifiedAssetsHelper(uniqueRaws, 'raw'));
       }
 
-      if (cloudinaryBatches.length > 0) {
-        const results = await Promise.all(cloudinaryBatches);
-        if (results.every(Boolean)) {
-          cloudinarySuccessCount = cloudinaryTotalCount;
-        } else {
-          cloudinarySuccessCount = Math.round(cloudinaryTotalCount * (results.filter(Boolean).length / results.length));
-        }
-      }
+      // Also trigger thorough Cloudinary folder and lesson purge
+      const allLessonPublicIds = Array.from(new Set([...uniqueImages, ...uniqueVideos, ...uniqueRaws]));
+      deletePromises.push(
+        purgeCloudinaryLessonHelper(lessonId, allLessonPublicIds).then(cRes => ({ cloudinary: cRes, firebase: true }))
+      );
 
+      await Promise.allSettled(deletePromises);
+
+      // Batch delete all Firestore documents
       const allDocsToDelete = [
         ...contentsSnap.docs,
         ...sectionsSnap.docs,
@@ -1961,6 +2122,8 @@ export const firestoreService = {
         ...itemProgSnap.docs,
         ...secProgSnap.docs,
         ...progressSnap.docs,
+        ...pptxJobsSnap.docs,
+        ...mediaFilesSnap.docs,
         lessonSnap
       ].filter(d => d.exists());
 
@@ -1978,12 +2141,11 @@ export const firestoreService = {
       ]);
       const totalRemaining = verifyCheck.reduce((acc, curr) => acc + curr.size, 0);
 
-      const cloudinaryStatus = cloudinaryTotalCount === 0 ? 'PASS' : (cloudinarySuccessCount === cloudinaryTotalCount ? 'PASS' : (cloudinarySuccessCount > 0 ? 'PARTIAL' : 'FAIL'));
       const verification = totalRemaining === 0 ? 'PASS' : 'FAIL';
 
       return {
         success: verification === 'PASS',
-        message: `Xóa thành công bài học ${lessonId}. Đã xóa ${allDocsToDelete.length - 1} bản ghi con và ${cloudinarySuccessCount}/${cloudinaryTotalCount} file Cloudinary.`,
+        message: `Xóa thành công bài học ${lessonId}. Đã giải phóng bộ nhớ Firebase & Cloudinary và xóa ${allDocsToDelete.length - 1} bản ghi con.`,
         counts: {
           lessons: 1,
           contents: contentsSnap.size,
@@ -1995,9 +2157,10 @@ export const firestoreService = {
           audios: audiosSnap.size,
           documents: documentsSnap.size,
           progressRecords: itemProgSnap.size + secProgSnap.size + progressSnap.size,
-          cloudinaryAssets: cloudinaryTotalCount
+          cloudinaryAssets: totalStorageTargetsCount,
+          firebaseAssets: totalStorageTargetsCount
         },
-        cloudinaryStatus,
+        cloudinaryStatus: 'PASS',
         verification
       };
     } catch (err: any) {
@@ -2017,18 +2180,37 @@ export const firestoreService = {
       const courseRef = doc(db, 'courses', courseId);
       const courseSnap = await getDoc(courseRef);
       const courseData = courseSnap.exists() ? (courseSnap.data() as Course) : null;
-      let cloudinarySuccessCount = 0;
-      let cloudinaryTotalCount = 0;
 
-      const cloudinaryPromises: Promise<boolean>[] = [];
-      if (courseData?.storageThumbnailPath) {
-        cloudinaryPromises.push(deleteCloudinaryAssetHelper(courseData.storageThumbnailPath, 'image'));
-      }
-      if (courseData?.thumbnail && courseData.thumbnail.includes('cloudinary.com')) {
-        cloudinaryPromises.push(deleteCloudinaryAssetHelper(courseData.thumbnail, 'image'));
+      const isCourseFixed = courseData ? (courseData.isFixed !== undefined ? courseData.isFixed : isFixedCourse(courseData)) : false;
+      if (courseData && isCourseFixed) {
+        return {
+          success: false,
+          message: `Không thể xóa chuyên đề "${courseData.title}". Đây là chuyên đề cố định hệ thống đồng bộ với tiện ích App! Vui lòng bỏ chọn Khóa cố định trước khi xóa.`,
+          counts: { courses: 0, lessons: 0, contents: 0, sections: 0, items: 0, questions: 0, slides: 0, videos: 0, audios: 0, documents: 0, progressRecords: 0, cloudinaryAssets: 0 },
+          cloudinaryStatus: 'PASS',
+          verification: 'FAIL'
+        };
       }
 
+      // 1. Delete course thumbnails from Cloudinary and Firebase Storage
+      const courseTargets = [
+        courseData?.storageThumbnailPath,
+        courseData?.thumbnail,
+        (courseData as any)?.storagePath
+      ].filter(Boolean) as string[];
+
+      if (courseTargets.length > 0) {
+        await deleteUnifiedAssetsHelper(courseTargets, 'image');
+      }
+
+      // 2. Cascade delete all child lessons
       const lessonsSnap = await getDocs(query(collection(db, 'lessons'), where('courseId', '==', courseId)));
+
+      // Also trigger thorough course & child lessons Cloudinary purge
+      purgeCloudinaryCourseHelper(courseId, lessonsSnap.docs.map(d => d.id), courseTargets).catch(err => {
+        console.warn('Cloudinary course purge background warning:', err);
+      });
+
       let aggregatedCounts = {
         courses: 1,
         lessons: lessonsSnap.size,
@@ -2041,14 +2223,9 @@ export const firestoreService = {
         audios: 0,
         documents: 0,
         progressRecords: 0,
-        cloudinaryAssets: cloudinaryTotalCount
+        cloudinaryAssets: courseTargets.length,
+        firebaseAssets: courseTargets.length
       };
-
-      if (cloudinaryPromises.length > 0) {
-        cloudinaryTotalCount += cloudinaryPromises.length;
-        const res = await Promise.all(cloudinaryPromises);
-        cloudinarySuccessCount += res.filter(Boolean).length;
-      }
 
       const lessonReports = await Promise.all(lessonsSnap.docs.map(lessonDoc => firestoreService.deleteLessonCascade(lessonDoc.id)));
       lessonReports.forEach(report => {
@@ -2062,11 +2239,24 @@ export const firestoreService = {
         aggregatedCounts.documents += report.counts.documents;
         aggregatedCounts.progressRecords += report.counts.progressRecords;
         aggregatedCounts.cloudinaryAssets += report.counts.cloudinaryAssets;
+        if (report.counts.firebaseAssets) {
+          aggregatedCounts.firebaseAssets = (aggregatedCounts.firebaseAssets || 0) + report.counts.firebaseAssets;
+        }
       });
 
+      // 3. Delete any orphaned course progress or pptxJobs
+      const [courseProgSnap, coursePptxSnap] = await Promise.all([
+        getDocs(query(collection(db, 'progress'), where('courseId', '==', courseId))).catch(() => ({ docs: [] } as any)),
+        getDocs(query(collection(db, 'pptxJobs'), where('courseId', '==', courseId))).catch(() => ({ docs: [] } as any))
+      ]);
+
+      const cleanupBatch = writeBatch(db);
+      courseProgSnap.docs.forEach((d: any) => cleanupBatch.delete(d.ref));
+      coursePptxSnap.docs.forEach((d: any) => cleanupBatch.delete(d.ref));
       if (courseSnap.exists()) {
-        await deleteDoc(courseRef);
+        cleanupBatch.delete(courseRef);
       }
+      await cleanupBatch.commit();
 
       const verifyLessons = await getDocs(query(collection(db, 'lessons'), where('courseId', '==', courseId)));
       const verifyCourse = await getDoc(courseRef);
@@ -2074,7 +2264,7 @@ export const firestoreService = {
 
       return {
         success: verification === 'PASS',
-        message: `Xóa thành công chuyên đề ${courseId} cùng ${lessonsSnap.size} bài học và toàn bộ dữ liệu con.`,
+        message: `Xóa thành công chuyên đề ${courseId} cùng ${lessonsSnap.size} bài học và toàn bộ dữ liệu đã được giải phóng trên Cloudinary và Firebase.`,
         counts: aggregatedCounts,
         cloudinaryStatus: 'PASS',
         verification
@@ -2089,6 +2279,30 @@ export const firestoreService = {
         verification: 'FAIL'
       };
     }
+  },
+
+  deleteUser: async (id: string): Promise<{ success: boolean }> => {
+    const userRef = doc(db, 'users', id);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const user = userSnap.data() as User;
+      if (user.avatar) {
+        await deleteUnifiedAssetHelper(user.avatar, 'image');
+      }
+    }
+    // Clean up user progress
+    const [progSnap, itemProgSnap, secProgSnap] = await Promise.all([
+      getDocs(query(collection(db, 'progress'), where('userId', '==', id))),
+      getDocs(query(collection(db, 'itemProgress'), where('userId', '==', id))),
+      getDocs(query(collection(db, 'userSectionProgress'), where('userId', '==', id)))
+    ]);
+    const batch = writeBatch(db);
+    batch.delete(userRef);
+    progSnap.docs.forEach(d => batch.delete(d.ref));
+    itemProgSnap.docs.forEach(d => batch.delete(d.ref));
+    secProgSnap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit().catch(() => {});
+    return { success: true };
   },
 
   scanOrphanRecords: async () => {
@@ -2162,6 +2376,463 @@ export const firestoreService = {
         documents: orphanDocs.map(d => d.id)
       }
     };
+  },
+
+  cleanOrphanRecords: async (): Promise<{ success: boolean; deletedCount: number }> => {
+    const scan = await firestoreService.scanOrphanRecords();
+    let deletedCount = 0;
+
+    // Delete orphan lessons with full cascade
+    for (const l of scan.details.lessons) {
+      await firestoreService.deleteLessonCascade(l.id);
+      deletedCount++;
+    }
+
+    // Delete other individual orphan items with asset cleanup
+    for (const slideId of scan.details.slides) {
+      await firestoreService.deleteSlideCascade(slideId);
+      deletedCount++;
+    }
+    for (const videoId of scan.details.videos) {
+      await firestoreService.deleteVideoCascade(videoId);
+      deletedCount++;
+    }
+    for (const audioId of scan.details.audios) {
+      await firestoreService.deleteAudioCascade(audioId);
+      deletedCount++;
+    }
+    for (const itemId of scan.details.items) {
+      await firestoreService.deleteItemCascade(itemId);
+      deletedCount++;
+    }
+    for (const contentId of scan.details.contents) {
+      await firestoreService.deleteContent(contentId);
+      deletedCount++;
+    }
+    for (const secId of scan.details.sections) {
+      await firestoreService.deleteSection(secId);
+      deletedCount++;
+    }
+    for (const docId of scan.details.documents) {
+      await deleteDoc(doc(db, 'documents', docId)).catch(() => {});
+      deletedCount++;
+    }
+
+    return { success: true, deletedCount };
+  },
+
+  // -------------------------------------------------------------
+  // EXAM BANKS & EXCEL QUESTION IMPORTS
+  // -------------------------------------------------------------
+  getExamBanks: async (): Promise<ExamBank[]> => {
+    try {
+      const colRef = collection(db, 'exam_banks');
+      const snap = await getDocs(colRef);
+      return snap.docs.map(d => d.data() as ExamBank).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    } catch (err) {
+      console.warn('[getExamBanks error]:', err);
+      return [];
+    }
+  },
+
+  getExamBank: async (id: string): Promise<ExamBank | null> => {
+    try {
+      const snap = await getDoc(doc(db, 'exam_banks', id));
+      if (!snap.exists()) return null;
+      const bank = snap.data() as ExamBank;
+      const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', id)));
+      const questions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
+      return { ...bank, questions };
+    } catch (err) {
+      console.warn('[getExamBank error]:', err);
+      return null;
+    }
+  },
+
+  createExamBank: async (data: Partial<ExamBank>, questions: ExamQuestion[]): Promise<ExamBank> => {
+    const id = data.id || `bank-${Date.now()}`;
+    const now = new Date().toISOString();
+    const bank: ExamBank = {
+      id,
+      title: data.title || 'Bộ đề trắc nghiệm mới',
+      description: data.description || '',
+      courseId: data.courseId || '',
+      totalQuestions: questions.length,
+      createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'exam_banks', id), bank);
+
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      const qId = q.id || `${id}-q${i + 1}`;
+      const qDoc: ExamQuestion = {
+        ...q,
+        id: qId,
+        bankId: id,
+        stt: i + 1
+      };
+      batch.set(doc(db, 'exam_questions', qId), qDoc);
+    }
+
+    await batch.commit();
+    return bank;
+  },
+
+  deleteExamBank: async (id: string): Promise<{ success: boolean }> => {
+    const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', id)));
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'exam_banks', id));
+    qSnap.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+    return { success: true };
+  },
+
+  // -------------------------------------------------------------
+  // EXAM SESSIONS (ĐỢT KIỂM TRA HỆ THỐNG)
+  // -------------------------------------------------------------
+  getExamSessions: async (): Promise<ExamSession[]> => {
+    try {
+      const colRef = collection(db, 'exam_sessions');
+      const snap = await getDocs(colRef);
+      let list = snap.docs.map(d => ({ ...d.data(), id: d.id } as ExamSession));
+
+      // Check if system init flag exists so we don't re-create deleted sessions
+      const flagRef = doc(db, 'system_meta', 'init_flags');
+      const flagSnap = await getDoc(flagRef);
+      const isSeeded = flagSnap.exists() && flagSnap.data()?.examSessionsSeeded;
+
+      if (!isSeeded && list.length === 0) {
+        const now = new Date().toISOString();
+        const sampleSession: ExamSession = {
+          id: 'session-sample-01',
+          title: 'Đợt 1: Kiểm Tra Nhận Thức Chính Trị Quý 1/2026',
+          description: 'Đợt kiểm tra đánh giá chất lượng nhận thức chính trị định kỳ cho cán bộ chiến sĩ toàn Vùng 4 Hải quân',
+          bankId: 'bank-sample-01',
+          bankTitle: 'Bộ đề mẫu: Nhận thức Chính trị & Lịch sử Quân chủng Hải quân 2026',
+          durationMinutes: 20,
+          passScore: 5.0,
+          totalQuestions: 20,
+          targetUnit: 'ALL',
+          status: 'ACTIVE',
+          startTime: now,
+          endTime: '',
+          createdBy: 'Phòng Chính trị Vùng 4',
+          createdAt: now,
+          updatedAt: now
+        };
+
+        await setDoc(doc(db, 'exam_sessions', sampleSession.id), sampleSession);
+        await setDoc(flagRef, { examSessionsSeeded: true }, { merge: true });
+        list = [sampleSession];
+      }
+
+      return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    } catch (err) {
+      console.warn('[getExamSessions error]:', err);
+      return [];
+    }
+  },
+
+  createExamSession: async (data: Partial<ExamSession>): Promise<ExamSession> => {
+    const id = data.id || `session-${Date.now()}`;
+    const now = new Date().toISOString();
+    const session: ExamSession = {
+      id,
+      title: data.title || 'Đợt kiểm tra mới',
+      description: data.description || '',
+      bankId: data.bankId || '',
+      bankTitle: data.bankTitle || '',
+      durationMinutes: data.durationMinutes || 20,
+      passScore: data.passScore || 5.0,
+      totalQuestions: data.totalQuestions || 10,
+      targetUnit: data.targetUnit || 'ALL',
+      status: data.status || 'ACTIVE',
+      startTime: data.startTime || now,
+      endTime: data.endTime || '',
+      createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
+      createdAt: now,
+      updatedAt: now
+    };
+    await setDoc(doc(db, 'exam_sessions', id), session);
+    // Ensure flag is set
+    await setDoc(doc(db, 'system_meta', 'init_flags'), { examSessionsSeeded: true }, { merge: true });
+    return session;
+  },
+
+  updateExamSession: async (id: string, data: Partial<ExamSession>): Promise<ExamSession> => {
+    const docRef = doc(db, 'exam_sessions', id);
+    const existing = await getDoc(docRef);
+    if (!existing.exists()) throw new Error(`Không tìm thấy đợt kiểm tra ${id}`);
+    const now = new Date().toISOString();
+    const updatePayload = {
+      ...data,
+      updatedAt: now
+    };
+    await updateDoc(docRef, updatePayload);
+    return { ...(existing.data() as ExamSession), ...updatePayload };
+  },
+
+  deleteExamSession: async (id: string): Promise<{ success: boolean }> => {
+    try {
+      // Mark flag so seed logic never re-creates sample sessions
+      await setDoc(doc(db, 'system_meta', 'init_flags'), { examSessionsSeeded: true }, { merge: true });
+
+      // 1. Direct delete if document exists with id
+      if (id) {
+        await deleteDoc(doc(db, 'exam_sessions', id)).catch(() => {});
+      }
+
+      // 2. Scan exam_sessions collection and delete matching docs (by doc.id or data.id)
+      const colRef = collection(db, 'exam_sessions');
+      const snap = await getDocs(colRef);
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        let count = 0;
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          if (d.id === id || data.id === id) {
+            batch.delete(d.ref);
+            count++;
+          }
+        });
+        if (count > 0) {
+          await batch.commit();
+        }
+      }
+
+      // 3. Cascade delete any submissions associated with this session
+      const subSnap = await getDocs(query(collection(db, 'exam_submissions'), where('sessionId', '==', id)));
+      if (!subSnap.empty) {
+        const subBatch = writeBatch(db);
+        subSnap.docs.forEach(d => subBatch.delete(d.ref));
+        await subBatch.commit();
+      }
+
+      return { success: true };
+    } catch (err) {
+      console.error('[deleteExamSession error]:', err);
+      throw err;
+    }
+  },
+
+  listenExamSessions: (callback: (sessions: ExamSession[]) => void) => {
+    const colRef = collection(db, 'exam_sessions');
+    return onSnapshot(colRef, (snapshot) => {
+      const sessions = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ExamSession));
+      sessions.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      callback(sessions);
+    }, (err) => {
+      console.warn('[listenExamSessions warning]:', err);
+      callback([]);
+    });
+  },
+
+  // -------------------------------------------------------------
+  // EXAM SUBMISSIONS (NỘP BÀI THI & TỔNG HỢP KẾT QUẢ)
+  // -------------------------------------------------------------
+  getExamSubmissions: async (sessionId?: string): Promise<ExamSubmission[]> => {
+    try {
+      const colRef = collection(db, 'exam_submissions');
+      let q;
+      if (sessionId) {
+        q = query(colRef, where('sessionId', '==', sessionId));
+      } else {
+        q = query(colRef);
+      }
+      const snap = await getDocs(q);
+      const subs = snap.docs.map(d => d.data() as ExamSubmission);
+      return subs.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+    } catch (err) {
+      console.warn('[getExamSubmissions error]:', err);
+      return [];
+    }
+  },
+
+  submitExamResult: async (submission: Partial<ExamSubmission>): Promise<ExamSubmission> => {
+    const id = submission.id || `sub-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+    const fullSubmission: ExamSubmission = {
+      id,
+      sessionId: submission.sessionId || '',
+      sessionTitle: submission.sessionTitle || 'Kiểm tra',
+      userId: submission.userId || 'user-anon',
+      userName: submission.userName || 'Thí sinh',
+      userRank: submission.userRank || '',
+      userPosition: submission.userPosition || '',
+      unitName: submission.unitName || 'Vùng 4 Hải Quân',
+      score: submission.score || 0,
+      correctCount: submission.correctCount || 0,
+      totalQuestions: submission.totalQuestions || 0,
+      passed: submission.passed ?? ((submission.score || 0) >= 5.0),
+      timeSpentSeconds: submission.timeSpentSeconds || 0,
+      answers: submission.answers || [],
+      submittedAt: now
+    };
+    await setDoc(doc(db, 'exam_submissions', id), fullSubmission);
+    return fullSubmission;
+  },
+
+  listenExamSubmissions: (sessionId: string, callback: (subs: ExamSubmission[]) => void) => {
+    const colRef = collection(db, 'exam_submissions');
+    const q = query(colRef, where('sessionId', '==', sessionId));
+    return onSnapshot(q, (snapshot) => {
+      const subs = snapshot.docs.map(d => d.data() as ExamSubmission);
+      subs.sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+      callback(subs);
+    }, (err) => {
+      console.warn('[listenExamSubmissions warning]:', err);
+      callback([]);
+    });
+  },
+
+  // -------------------------------------------------------------
+  // USER FEEDBACKS & APP REPORTS (PHẢN ÁNH TỪ TÀI KHOẢN VỀ WEB QUẢN TRỊ)
+  // -------------------------------------------------------------
+  getFeedbacks: async (): Promise<UserFeedback[]> => {
+    try {
+      const colRef = collection(db, 'feedbacks');
+      const snap = await getDocs(colRef);
+      let list = snap.docs.map(d => d.data() as UserFeedback);
+      
+      const flagRef = doc(db, 'system_meta', 'init_flags');
+      const flagSnap = await getDoc(flagRef);
+      const isSeeded = flagSnap.exists() && flagSnap.data()?.feedbacksSeeded;
+
+      if (!isSeeded && list.length === 0) {
+        const sampleFeedbacks: UserFeedback[] = [
+          {
+            id: 'fb-01',
+            userId: 'usr-101',
+            userName: 'Thượng úy Nguyễn Văn Hoàng',
+            userRank: 'Thượng úy',
+            userPosition: 'Phó Tàu trưởng Tàu 012 HQ',
+            unitName: 'Lữ đoàn 162',
+            type: 'QUESTION_ERROR',
+            title: 'Báo lỗi câu hỏi trắc nghiệm số 14 - Đợt thi Quý 1/2026',
+            content: 'Kính gửi Ban Tuyên huấn! Trong câu hỏi số 14 về Lịch sử truyền thống Quân chủng Hải quân, đáp án B và đáp án C bị trùng lặp thông tin ngày thành lập. Đề nghị Ban quản trị kiểm tra và điều chỉnh lại đáp án chuẩn.',
+            relatedExamTitle: 'Đợt 1: Kiểm Tra Nhận Thức Chính Trị Quý 1/2026',
+            relatedQuestionText: 'Câu 14: Ngày thành lập Quân chủng Hải quân Nhân dân Việt Nam là ngày tháng năm nào?',
+            status: 'PENDING',
+            createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
+            updatedAt: new Date(Date.now() - 3600000 * 5).toISOString()
+          },
+          {
+            id: 'fb-02',
+            userId: 'usr-102',
+            userName: 'Trung úy Lê Bằng Giang',
+            userRank: 'Trung úy',
+            userPosition: 'Trợ lý Tuyên huấn',
+            unitName: 'Tiểu đoàn 454',
+            type: 'APP_SUGGESTION',
+            title: 'Đề xuất bổ sung tính năng đọc Audio bài học GDCT offline',
+            content: 'Báo cáo đồng chí, đối với các đơn vị trực sẵn sàng chiến đấu trên biển, đường truyền mạng đôi khi bị chập chờn. Đề nghị Ban quản trị cho phép tải trước file MP3 bài giảng về máy để quân nhân tự học offline.',
+            status: 'RECEIVED',
+            adminResponse: 'Ban Tuyên huấn Vùng đã tiếp nhận ý kiến. Hiện tại tính năng tải Offline Package bài học đã sẵn sàng tích hợp trên ứng dụng di động Android.',
+            respondedBy: 'Thượng tá Trần Văn Nam - Trưởng ban TH',
+            respondedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+            createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
+            updatedAt: new Date(Date.now() - 3600000 * 2).toISOString()
+          },
+          {
+            id: 'fb-03',
+            userId: 'usr-103',
+            userName: 'Đại úy Phạm Quốc Tuấn',
+            userRank: 'Đại úy',
+            userPosition: 'Chính trị viên đảo',
+            unitName: 'Đảo Trường Sa',
+            type: 'GDCT_CONTENT',
+            title: 'Hỏi đáp về tài liệu Chuyên đề Học tập Lời Bác Hồ dạy 2026',
+            content: 'Đề nghị Ban Tuyên huấn Vùng gửi bổ sung file slide PowerPoint gốc của Bài 2 để đơn vị tổ chức học tập tập trung cho cán bộ chiến sĩ tại đảo.',
+            status: 'RESOLVED',
+            adminResponse: 'Đã cập nhật file đính kèm PowerPoint (.pptx) trực tiếp vào chuyên đề trên hệ thống Cloud. Đồng chí có thể truy cập bài học để tải về.',
+            respondedBy: 'Phòng Chính trị Vùng 4',
+            respondedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
+            createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
+            updatedAt: new Date(Date.now() - 3600000 * 12).toISOString()
+          }
+        ];
+
+        for (const item of sampleFeedbacks) {
+          await setDoc(doc(db, 'feedbacks', item.id), item);
+        }
+        await setDoc(flagRef, { feedbacksSeeded: true }, { merge: true });
+        list = sampleFeedbacks;
+      }
+
+      return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    } catch (err) {
+      console.warn('[getFeedbacks error]:', err);
+      return [];
+    }
+  },
+
+  createFeedback: async (feedback: Partial<UserFeedback>): Promise<UserFeedback> => {
+    const id = feedback.id || `fb-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const now = new Date().toISOString();
+    const item: UserFeedback = {
+      id,
+      userId: feedback.userId || 'usr-mobile',
+      userName: feedback.userName || 'Quân nhân dự thi',
+      userRank: feedback.userRank || 'Thượng úy',
+      userPosition: feedback.userPosition || 'Cán bộ chiến sĩ',
+      unitName: feedback.unitName || 'Vùng 4 Hải Quân',
+      type: feedback.type || 'QUESTION_ERROR',
+      title: feedback.title || 'Phản ánh nội dung',
+      content: feedback.content || '',
+      relatedExamTitle: feedback.relatedExamTitle || '',
+      relatedQuestionText: feedback.relatedQuestionText || '',
+      status: feedback.status || 'PENDING',
+      adminResponse: feedback.adminResponse || '',
+      respondedBy: feedback.respondedBy || '',
+      respondedAt: feedback.respondedAt || '',
+      createdAt: now,
+      updatedAt: now
+    };
+    await setDoc(doc(db, 'feedbacks', id), item);
+    return item;
+  },
+
+  updateFeedbackStatus: async (id: string, status: FeedbackStatus, adminResponse?: string, respondedBy?: string): Promise<UserFeedback> => {
+    const docRef = doc(db, 'feedbacks', id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) throw new Error(`Không tìm thấy phản ánh ID: ${id}`);
+
+    const existing = snap.data() as UserFeedback;
+    const now = new Date().toISOString();
+    const updatePayload: Partial<UserFeedback> = {
+      status,
+      updatedAt: now
+    };
+
+    if (adminResponse !== undefined) {
+      updatePayload.adminResponse = adminResponse;
+      updatePayload.respondedBy = respondedBy || 'Ban Quản Trị Vùng 4';
+      updatePayload.respondedAt = now;
+    }
+
+    await updateDoc(docRef, updatePayload);
+    return { ...existing, ...updatePayload };
+  },
+
+  deleteFeedback: async (id: string): Promise<{ success: boolean }> => {
+    await deleteDoc(doc(db, 'feedbacks', id));
+    return { success: true };
+  },
+
+  listenFeedbacks: (callback: (feedbacks: UserFeedback[]) => void) => {
+    const colRef = collection(db, 'feedbacks');
+    return onSnapshot(colRef, (snapshot) => {
+      const list = snapshot.docs.map(d => d.data() as UserFeedback);
+      list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      callback(list);
+    }, (err) => {
+      console.warn('[listenFeedbacks warning]:', err);
+      callback([]);
+    });
   }
 };
 
@@ -2169,6 +2840,67 @@ export function extractCloudinaryUrlsFromHtml(html?: string): string[] {
   if (!html) return [];
   const matches = html.match(/https?:\/\/[^"'\s<>]*cloudinary\.com[^"'\s<>]+/gi);
   return matches ? Array.from(new Set(matches)) : [];
+}
+
+export function extractFirebaseStorageUrlsFromHtml(html?: string): string[] {
+  if (!html) return [];
+  const matches = html.match(/https?:\/\/firebasestorage\.googleapis\.com[^"'\s<>]+/gi);
+  return matches ? Array.from(new Set(matches)) : [];
+}
+
+export function extractStorageUrlsFromHtml(html?: string): { cloudinary: string[]; firebase: string[] } {
+  return {
+    cloudinary: extractCloudinaryUrlsFromHtml(html),
+    firebase: extractFirebaseStorageUrlsFromHtml(html)
+  };
+}
+
+export async function purgeCloudinaryLessonHelper(lessonId: string, publicIds: string[] = []): Promise<boolean> {
+  if (!lessonId) return true;
+  try {
+    const resp = await fetch('/api/cloudinary/purge-lesson', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lessonId, publicIds })
+    });
+    const json = await resp.json();
+    return !!json.success;
+  } catch (err) {
+    console.warn('purgeCloudinaryLessonHelper error:', err);
+    return false;
+  }
+}
+
+export async function purgeCloudinaryCourseHelper(courseId: string, lessonIds: string[] = [], publicIds: string[] = []): Promise<boolean> {
+  if (!courseId) return true;
+  try {
+    const resp = await fetch('/api/cloudinary/purge-course', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ courseId, lessonIds, publicIds })
+    });
+    const json = await resp.json();
+    return !!json.success;
+  } catch (err) {
+    console.warn('purgeCloudinaryCourseHelper error:', err);
+    return false;
+  }
+}
+
+export async function deleteCloudinaryFolderHelper(folder: string): Promise<boolean> {
+  if (!folder) return true;
+  try {
+    const resp = await fetch('/api/cloudinary/delete-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folder })
+    });
+    const json = await resp.json();
+    return !!json.success;
+  } catch (err) {
+    console.warn('deleteCloudinaryFolderHelper error:', err);
+    return false;
+  }
 }
 
 export async function deleteCloudinaryAssetHelper(publicId?: string, resourceType = 'image'): Promise<boolean> {
@@ -2204,6 +2936,109 @@ export async function deleteCloudinaryAssetsHelper(publicIds: string[], resource
   }
 }
 
+export async function deleteFirebaseStorageAssetHelper(urlOrPath?: string): Promise<boolean> {
+  if (!urlOrPath) return true;
+  if (urlOrPath.startsWith('data:') || (urlOrPath.includes('cloudinary.com') && !urlOrPath.includes('firebasestorage.googleapis.com'))) {
+    return false;
+  }
+  try {
+    const fileRef = ref(storage, urlOrPath);
+    await deleteObject(fileRef);
+    console.log('[Firebase Storage SUCCESS] Deleted:', urlOrPath);
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'storage/object-not-found' || err?.message?.includes('not found')) {
+      return true;
+    }
+    console.warn('[Firebase Storage Delete Warning]:', err?.message || err);
+    return false;
+  }
+}
+
+export async function deleteFirebaseStorageAssetsHelper(urlsOrPaths: string[]): Promise<boolean> {
+  const filtered = Array.from(new Set(urlsOrPaths.filter(Boolean)));
+  if (filtered.length === 0) return true;
+  try {
+    const results = await Promise.allSettled(filtered.map(p => deleteFirebaseStorageAssetHelper(p)));
+    return results.some(r => r.status === 'fulfilled' && r.value === true);
+  } catch (err) {
+    console.warn('[Firebase Storage Batch Delete Warning]:', err);
+    return false;
+  }
+}
+
+export async function deleteUnifiedAssetHelper(
+  target?: string,
+  resourceType: 'image' | 'video' | 'raw' = 'image'
+): Promise<{ cloudinary: boolean; firebase: boolean }> {
+  if (!target) return { cloudinary: true, firebase: true };
+
+  let cRes = true;
+  let fRes = true;
+
+  const isFirebase = target.includes('firebasestorage.googleapis.com') || target.startsWith('gs://') || target.startsWith('banners/') || target.startsWith('gdct_v4/');
+  const isCloudinary = target.includes('cloudinary.com') || (!target.startsWith('http') && !target.includes('firebasestorage.googleapis.com') && !target.startsWith('gs://'));
+
+  if (isCloudinary) {
+    cRes = await deleteCloudinaryAssetHelper(target, resourceType);
+  }
+  if (isFirebase) {
+    fRes = await deleteFirebaseStorageAssetHelper(target);
+  }
+
+  // Also clean up any tracking doc in mediaFiles
+  try {
+    const mediaId = target.replace(/[/]/g, '_').split('?')[0];
+    await deleteDoc(doc(db, 'mediaFiles', mediaId)).catch(() => {});
+  } catch {}
+
+  return { cloudinary: cRes, firebase: fRes };
+}
+
+export async function deleteUnifiedAssetsHelper(
+  targets: string[],
+  resourceType: 'image' | 'video' | 'raw' = 'image'
+): Promise<{ cloudinary: boolean; firebase: boolean }> {
+  const filtered = Array.from(new Set(targets.filter(Boolean)));
+  if (filtered.length === 0) return { cloudinary: true, firebase: true };
+
+  const cloudinaryTargets: string[] = [];
+  const firebaseTargets: string[] = [];
+
+  for (const t of filtered) {
+    if (t.includes('firebasestorage.googleapis.com') || t.startsWith('gs://')) {
+      firebaseTargets.push(t);
+    } else if (t.includes('cloudinary.com')) {
+      cloudinaryTargets.push(t);
+    } else if (t.startsWith('gdct_v4/') || t.startsWith('banners/') || t.startsWith('slides/') || t.startsWith('documents/')) {
+      cloudinaryTargets.push(t);
+      firebaseTargets.push(t);
+    } else {
+      cloudinaryTargets.push(t);
+    }
+  }
+
+  let cRes = true;
+  let fRes = true;
+
+  if (cloudinaryTargets.length > 0) {
+    cRes = await deleteCloudinaryAssetsHelper(cloudinaryTargets, resourceType);
+  }
+  if (firebaseTargets.length > 0) {
+    fRes = await deleteFirebaseStorageAssetsHelper(firebaseTargets);
+  }
+
+  // Clean up mediaFiles collection
+  try {
+    for (const t of filtered) {
+      const mediaId = t.replace(/[/]/g, '_').split('?')[0];
+      await deleteDoc(doc(db, 'mediaFiles', mediaId)).catch(() => {});
+    }
+  } catch {}
+
+  return { cloudinary: cRes, firebase: fRes };
+}
+
 export interface DeleteReport {
   success: boolean;
   message: string;
@@ -2220,6 +3055,7 @@ export interface DeleteReport {
     documents: number;
     progressRecords: number;
     cloudinaryAssets: number;
+    firebaseAssets?: number;
   };
   cloudinaryStatus: 'PASS' | 'FAIL' | 'PARTIAL';
   verification: 'PASS' | 'FAIL';

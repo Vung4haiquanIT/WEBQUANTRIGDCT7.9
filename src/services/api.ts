@@ -33,7 +33,14 @@ import {
   SourceDocument,
   UserItemProgress,
   UserSectionProgress,
-  AppBanner
+  AppBanner,
+  ExamBank,
+  ExamQuestion,
+  ExamSession,
+  ExamSubmission,
+  UserFeedback,
+  FeedbackType,
+  FeedbackStatus
 } from '../types';
 
 /**
@@ -970,8 +977,7 @@ export const api = {
   },
 
   deleteUser: async (id: string): Promise<{ success: boolean }> => {
-    await deleteDoc(doc(db, 'users', id));
-    return { success: true };
+    return await firestoreService.deleteUser(id);
   },
 
   // -------------------------------------------------------------
@@ -1264,5 +1270,79 @@ export const api = {
       message: `Đã đồng bộ thành công ${syncedResults.length} bản ghi tiến độ lên Firestore`,
       syncedResults
     };
+  },
+
+  // -------------------------------------------------------------
+  // EXAM BANKS, SESSIONS & SUBMISSIONS (ĐỢT KIỂM TRA & BỘ ĐỀ EXCEL)
+  // -------------------------------------------------------------
+  getExamBanks: async (): Promise<ExamBank[]> => {
+    return await firestoreService.getExamBanks();
+  },
+
+  getExamBank: async (id: string): Promise<ExamBank | null> => {
+    return await firestoreService.getExamBank(id);
+  },
+
+  createExamBank: async (data: Partial<ExamBank>, questions: ExamQuestion[]): Promise<ExamBank> => {
+    return await firestoreService.createExamBank(data, questions);
+  },
+
+  deleteExamBank: async (id: string): Promise<{ success: boolean }> => {
+    return await firestoreService.deleteExamBank(id);
+  },
+
+  getExamSessions: async (): Promise<ExamSession[]> => {
+    return await firestoreService.getExamSessions();
+  },
+
+  createExamSession: async (data: Partial<ExamSession>): Promise<ExamSession> => {
+    return await firestoreService.createExamSession(data);
+  },
+
+  updateExamSession: async (id: string, data: Partial<ExamSession>): Promise<ExamSession> => {
+    return await firestoreService.updateExamSession(id, data);
+  },
+
+  deleteExamSession: async (id: string): Promise<{ success: boolean }> => {
+    return await firestoreService.deleteExamSession(id);
+  },
+
+  listenExamSessions: (callback: (sessions: ExamSession[]) => void) => {
+    return firestoreService.listenExamSessions(callback);
+  },
+
+  getExamSubmissions: async (sessionId?: string): Promise<ExamSubmission[]> => {
+    return await firestoreService.getExamSubmissions(sessionId);
+  },
+
+  submitExamResult: async (submission: Partial<ExamSubmission>): Promise<ExamSubmission> => {
+    return await firestoreService.submitExamResult(submission);
+  },
+
+  listenExamSubmissions: (sessionId: string, callback: (subs: ExamSubmission[]) => void) => {
+    return firestoreService.listenExamSubmissions(sessionId, callback);
+  },
+
+  // -------------------------------------------------------------
+  // USER FEEDBACKS & REPORTS (PHẢN ÁNH TỪ CÁC TÀI KHOẢN VỀ WEB QUẢN TRỊ)
+  // -------------------------------------------------------------
+  getFeedbacks: async (): Promise<UserFeedback[]> => {
+    return await firestoreService.getFeedbacks();
+  },
+
+  createFeedback: async (feedback: Partial<UserFeedback>): Promise<UserFeedback> => {
+    return await firestoreService.createFeedback(feedback);
+  },
+
+  updateFeedbackStatus: async (id: string, status: FeedbackStatus, adminResponse?: string, respondedBy?: string): Promise<UserFeedback> => {
+    return await firestoreService.updateFeedbackStatus(id, status, adminResponse, respondedBy);
+  },
+
+  deleteFeedback: async (id: string): Promise<{ success: boolean }> => {
+    return await firestoreService.deleteFeedback(id);
+  },
+
+  listenFeedbacks: (callback: (feedbacks: UserFeedback[]) => void) => {
+    return firestoreService.listenFeedbacks(callback);
   }
 };

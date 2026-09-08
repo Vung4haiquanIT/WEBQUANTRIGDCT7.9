@@ -15,6 +15,8 @@ import { Header } from './components/Header';
 import { LessonPreviewModal } from './components/LessonPreviewModal';
 import { DashboardView } from './views/DashboardView';
 import { CoursesView } from './views/CoursesView';
+import { ExamsView } from './views/ExamsView';
+import { FeedbacksView } from './views/FeedbacksView';
 import { LessonEditorView } from './views/LessonEditorView';
 import { UsersView } from './views/UsersView';
 import { UnitsView } from './views/UnitsView';
@@ -23,9 +25,22 @@ import { ProgressView } from './views/ProgressView';
 import { NotificationsView } from './views/NotificationsView';
 import { SettingsView } from './views/SettingsView';
 import { FirebaseDiagnosticsView } from './views/FirebaseDiagnosticsView';
+import { LoginView } from './views/LoginView';
 import { Radio, Bell, CheckCircle } from 'lucide-react';
 
 export function App() {
+  const [adminUser, setAdminUser] = useState<{ email: string; name: string; role: string } | null>(() => {
+    try {
+      const saved = localStorage.getItem('hq_admin_session') || sessionStorage.getItem('hq_admin_session');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn('Failed to parse admin session:', e);
+    }
+    return null;
+  });
+
   const [currentView, setCurrentView] = useState<string>('dashboard');
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [realtimeNotification, setRealtimeNotification] = useState<string | null>(null);
@@ -49,6 +64,7 @@ export function App() {
 
   // Load all initial data from backend API
   const fetchAllData = async () => {
+    if (!adminUser) return;
     try {
       setIsLoading(true);
       const [
@@ -90,22 +106,30 @@ export function App() {
   };
 
   useEffect(() => {
-    fetchAllData();
-
-    // Subscribe to SSE Realtime Synchronization
-    const unsubscribe = api.subscribeRealtime((event: RealtimeEvent) => {
-      setIsRealtimeConnected(true);
-      setRealtimeNotification(`Đồng bộ Realtime: [${event.type}] lúc ${new Date(event.timestamp).toLocaleTimeString('vi-VN')}`);
-      setTimeout(() => setRealtimeNotification(null), 4000);
-
-      // Auto refresh data on realtime events
+    if (adminUser) {
       fetchAllData();
-    });
 
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+      // Subscribe to SSE Realtime Synchronization
+      const unsubscribe = api.subscribeRealtime((event: RealtimeEvent) => {
+        setIsRealtimeConnected(true);
+        setRealtimeNotification(`Đồng bộ Realtime: [${event.type}] lúc ${new Date(event.timestamp).toLocaleTimeString('vi-VN')}`);
+        setTimeout(() => setRealtimeNotification(null), 4000);
+
+        // Auto refresh data on realtime events
+        fetchAllData();
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, [adminUser]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('hq_admin_session');
+    sessionStorage.removeItem('hq_admin_session');
+    setAdminUser(null);
+  };
 
   // -------------------------------------------------------------
   // Course CRUD Handlers
@@ -121,8 +145,17 @@ export function App() {
   };
 
   const handleDeleteCourse = async (id: string, permanent = false) => {
-    await api.deleteCourse(id, permanent);
-    await fetchAllData();
+    // 1. Optimistic removal from UI state immediately
+    setCourses(prev => prev.filter(c => c.id !== id));
+    if (permanent) {
+      setLessons(prev => prev.filter(l => l.courseId !== id));
+    }
+    // 2. Perform backend & CDN cascade deletion in background
+    api.deleteCourse(id, permanent).catch(err => {
+      console.warn('Background course delete warning:', err);
+    }).finally(() => {
+      fetchAllData();
+    });
   };
 
   const handleRestoreCourse = async (id: string) => {
@@ -152,12 +185,18 @@ export function App() {
   };
 
   const handleDeleteLesson = async (id: string, permanent = false) => {
-    await api.deleteLesson(id, permanent);
+    // 1. Optimistic removal from UI state immediately
+    setLessons(prev => prev.filter(l => l.id !== id));
     if (selectedLessonForEditing && selectedLessonForEditing.id === id) {
       setSelectedLessonForEditing(null);
       setCurrentView('courses');
     }
-    await fetchAllData();
+    // 2. Perform backend & CDN cascade deletion in background
+    api.deleteLesson(id, permanent).catch(err => {
+      console.warn('Background lesson delete warning:', err);
+    }).finally(() => {
+      fetchAllData();
+    });
   };
 
   const handleRestoreLesson = async (id: string) => {
@@ -210,6 +249,17 @@ export function App() {
     await fetchAllData();
   };
 
+  // If not logged in as Admin, show the Military Admin Login Portal first
+  if (!adminUser) {
+    return (
+      <LoginView
+        onLoginSuccess={(user) => {
+          setAdminUser(user);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans selection:bg-amber-400 selection:text-slate-950">
       {/* Realtime Notification Toast */}
@@ -229,6 +279,8 @@ export function App() {
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
         onRefresh={fetchAllData}
+        adminUser={adminUser}
+        onLogout={handleLogout}
         onOpenTrash={() => {
           setSelectedLessonForEditing(null);
           setCurrentView('courses');
@@ -245,6 +297,7 @@ export function App() {
             setCurrentView(tab);
           }}
           trashCount={deletedCourses.length + deletedLessons.length}
+          onLogout={handleLogout}
         />
 
         {/* Dynamic Main Content Workspace */}
@@ -291,6 +344,10 @@ export function App() {
               onDuplicateLesson={handleDuplicateLesson}
               onDeleteLesson={handleDeleteLesson}
             />
+          ) : currentView === 'exams' ? (
+            <ExamsView currentUser={adminUser} units={units} />
+          ) : currentView === 'feedbacks' ? (
+            <FeedbacksView currentUser={adminUser} units={units} />
           ) : currentView === 'users' ? (
             <UsersView
               users={users}

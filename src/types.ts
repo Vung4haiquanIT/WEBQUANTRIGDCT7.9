@@ -83,6 +83,8 @@ export interface Course {
   status: PublishStatus;
   version: number;
   isDeleted?: boolean;
+  isFixed?: boolean; // Chuyên đề cố định hệ thống đồng bộ với tiện ích App (GDCT, GDPL, LỊCH SỬ TRUYỀN THỐNG, BIỂN ĐẢO VIỆT NAM)
+  categoryKey?: 'GDCT' | 'GDPL' | 'LICH_SU' | 'BIEN_DAO' | string; // Mã phân loại chuyên đề cố định
   lessonCount?: number;
   publishedLessonCount?: number;
   createdBy: string;
@@ -753,6 +755,102 @@ export interface AppBanner {
   backgroundColor?: string;
   order: number; // 1 to 5
   isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// -------------------------------------------------------------
+// Exam Bank, Exam Session, Questions & Submissions
+// -------------------------------------------------------------
+export interface ExamQuestion {
+  id: string;
+  bankId: string;
+  stt: number;
+  question: string;                 // Nội dung câu hỏi (Cột 2)
+  options: string[];                // Các lựa chọn (Cột 3-6: A, B, C, D - có thể 3 hoặc 4 phương án)
+  correctOptionIndex: number;       // Chỉ số đáp án đúng (0, 1, 2, 3) (Cột 7)
+  correctAnswerText?: string;       // Văn bản đáp án đúng
+  explanation?: string;            // Giải thích đáp án (nếu có)
+}
+
+export interface ExamBank {
+  id: string;
+  title: string;                    // Tên bộ đề (vd: "Bộ đề trắc nghiệm Nhận thức Chính trị 2026")
+  description?: string;
+  courseId?: string;
+  totalQuestions: number;
+  questions?: ExamQuestion[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExamSession {
+  id: string;
+  title: string;                    // Tên đợt kiểm tra (vd: "Đợt 1: Kiểm tra Nhận thức Chính trị Quý 1/2026")
+  description?: string;
+  bankId: string;                   // Bộ đề sử dụng
+  bankTitle?: string;
+  durationMinutes: number;          // Thời gian làm bài (phút), vd: 20
+  passScore: number;                // Điểm đạt (trên thang điểm 10), vd: 5.0
+  totalQuestions: number;
+  targetUnit: string;               // 'ALL' hoặc tên Đơn vị cụ thể
+  status: 'DRAFT' | 'ACTIVE' | 'COMPLETED'; // Trạng thái đợt kiểm tra
+  startTime?: string;
+  endTime?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExamAnswerRecord {
+  questionId: string;
+  questionText: string;
+  selectedOption: number;
+  correctOption: number;
+  isCorrect: boolean;
+}
+
+export interface ExamSubmission {
+  id: string;
+  sessionId: string;                // Mã đợt kiểm tra
+  sessionTitle: string;
+  userId: string;
+  userName: string;
+  userRank?: string;
+  userPosition?: string;
+  unitName: string;
+  score: number;                    // Điểm số (thang điểm 10)
+  correctCount: number;             // Số câu trả lời đúng
+  totalQuestions: number;           // Tổng số câu hỏi
+  passed: boolean;                  // Đạt hay Không đạt
+  timeSpentSeconds: number;         // Thời gian làm bài (giây)
+  answers?: ExamAnswerRecord[];
+  submittedAt: string;
+}
+
+// -------------------------------------------------------------
+// User Feedbacks & Question/App Reports
+// -------------------------------------------------------------
+export type FeedbackType = 'QUESTION_ERROR' | 'EXAM_ERROR' | 'APP_SUGGESTION' | 'GDCT_CONTENT' | 'OTHER';
+export type FeedbackStatus = 'PENDING' | 'RECEIVED' | 'PROCESSING' | 'RESOLVED';
+
+export interface UserFeedback {
+  id: string;
+  userId: string;
+  userName: string;
+  userRank?: string;
+  userPosition?: string;
+  unitName: string;
+  type: FeedbackType;
+  title: string;
+  content: string;
+  relatedExamTitle?: string;
+  relatedQuestionText?: string;
+  status: FeedbackStatus;
+  adminResponse?: string;
+  respondedBy?: string;
+  respondedAt?: string;
   createdAt: string;
   updatedAt: string;
 }

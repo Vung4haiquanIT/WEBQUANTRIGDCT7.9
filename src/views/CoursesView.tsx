@@ -22,11 +22,19 @@ import {
   MoreVertical,
   ArrowUpDown,
   Upload,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Lock,
+  Smartphone,
+  ShieldCheck
 } from 'lucide-react';
 import { Course, Lesson, PublishStatus } from '../types';
 import { DongSonDrum } from '../components/DongSonMotif';
 import { api } from '../services/api';
+import { 
+  isFixedCourse, 
+  getFixedCourseCategory, 
+  FIXED_COURSES_DEFINITIONS 
+} from '../utils/fixedCourses';
 
 interface CoursesViewProps {
   courses: Course[];
@@ -61,6 +69,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const [searchFilter, setSearchFilter] = useState('');
   const [yearFilter, setYearFilter] = useState<number | 'ALL'>('ALL');
   const [statusFilter, setStatusFilter] = useState<PublishStatus | 'ALL'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
   // Modal state for Course
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
@@ -71,6 +80,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     year: 2026,
     thumbnail: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80',
     status: 'REVIEW' as PublishStatus,
+    isFixed: false,
     createdBy: 'Phòng Chính trị Vùng 4',
   });
 
@@ -117,6 +127,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       year: 2026,
       thumbnail: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80',
       status: 'REVIEW',
+      isFixed: false,
       createdBy: 'Phòng Chính trị Vùng 4',
     });
     setIsCourseModalOpen(true);
@@ -124,11 +135,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   const handleOpenEditCourse = (course: Course) => {
     setEditingCourse(course);
+    const isFixed = course.isFixed !== undefined ? course.isFixed : isFixedCourse(course);
     setCourseFormData({
       title: course.title,
       year: course.year,
       thumbnail: course.thumbnail,
       status: course.status || 'REVIEW',
+      isFixed,
       createdBy: course.createdBy,
     });
     setIsCourseModalOpen(true);
@@ -150,19 +163,29 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const [isDeletingItem, setIsDeletingItem] = useState(false);
 
   const handleConfirmDeleteCourse = (course: Course) => {
+    const isFixed = course.isFixed !== undefined ? course.isFixed : isFixedCourse(course);
+    if (isFixed) {
+      alert(`Chuyên đề "${course.title}" đang được Khóa cố định chống xóa!\n\nNếu đồng chí muốn xóa chuyên đề này, vui lòng nhấn nút Sửa (biểu tượng cây bút), bỏ chọn "Khóa cố định chuyên đề này", sau đó nhấn Lưu lại để mở khóa trước khi xóa.`);
+      return;
+    }
     setCourseToDelete(course);
   };
 
   const handleExecuteDeleteCourse = async () => {
     if (!courseToDelete) return;
-    setIsDeletingItem(true);
-    try {
-      await onDeleteCourse(courseToDelete.id, true);
+    const isFixed = courseToDelete.isFixed !== undefined ? courseToDelete.isFixed : isFixedCourse(courseToDelete);
+    if (isFixed) {
+      alert('Không thể xóa chuyên đề đang ở trạng thái Khóa cố định!');
       setCourseToDelete(null);
+      return;
+    }
+    const targetId = courseToDelete.id;
+    // Close modal instantly
+    setCourseToDelete(null);
+    try {
+      await onDeleteCourse(targetId, true);
     } catch (err) {
       console.error(err);
-    } finally {
-      setIsDeletingItem(false);
     }
   };
 
@@ -172,14 +195,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   const handleExecuteDeleteLesson = async () => {
     if (!lessonToDelete) return;
-    setIsDeletingItem(true);
+    const targetId = lessonToDelete.id;
+    // Close modal instantly
+    setLessonToDelete(null);
     try {
-      await onDeleteLesson(lessonToDelete.id, true);
-      setLessonToDelete(null);
+      await onDeleteLesson(targetId, true);
     } catch (err) {
       console.error(err);
-    } finally {
-      setIsDeletingItem(false);
     }
   };
 
@@ -228,10 +250,22 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const filteredCourses = courses.filter((c) => {
     const matchSearch =
       c.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      c.description.toLowerCase().includes(searchFilter.toLowerCase());
+      (c.description && c.description.toLowerCase().includes(searchFilter.toLowerCase()));
     const matchYear = yearFilter === 'ALL' || c.year === yearFilter;
     const matchStatus = statusFilter === 'ALL' || c.status === statusFilter;
-    return matchSearch && matchYear && matchStatus;
+    
+    let matchCategory = true;
+    const cIsFixed = c.isFixed !== undefined ? c.isFixed : isFixedCourse(c);
+    if (categoryFilter === 'FIXED') {
+      matchCategory = cIsFixed;
+    } else if (categoryFilter === 'CUSTOM') {
+      matchCategory = !cIsFixed;
+    } else if (categoryFilter !== 'ALL') {
+      const cat = getFixedCourseCategory(c);
+      matchCategory = cat?.categoryKey === categoryFilter || c.categoryKey === categoryFilter;
+    }
+
+    return matchSearch && matchYear && matchStatus && matchCategory;
   });
 
   return (
@@ -240,10 +274,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm">
         <div>
           <div className="flex items-center space-x-2">
-            <span className="text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-              Kiến trúc phân cấp
+            <span className="text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded border border-blue-200 flex items-center gap-1">
+              <Smartphone className="w-3.5 h-3.5" />
+              Đồng bộ Tiện ích App
             </span>
-            <span className="text-xs text-slate-500">Chuyên đề &rarr; Bài học &rarr; Đa phương tiện</span>
+            <span className="text-xs text-slate-500">Chuyên đề cố định (GDCT, GDPL, Lịch sử, Biển đảo) & Chuyên đề mới tạo</span>
           </div>
           <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight mt-1">
             QUẢN LÝ CHUYÊN ĐỀ & BÀI HỌC GIÁO DỤC CHÍNH TRỊ
@@ -257,7 +292,102 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             className="flex items-center space-x-2 bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all"
           >
             <Plus className="w-4 h-4" />
-            <span>Thêm Chuyên đề</span>
+            <span>Thêm Chuyên đề mới</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Sync Banner & Category Filter Tabs */}
+      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-3xl p-5 text-white shadow-md border border-blue-800/40">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-blue-800/60">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
+                <span>4 Chuyên đề Cố định Hệ thống (Mục Tiện ích App Mobile)</span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full font-mono">
+                  Không thể xóa
+                </span>
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Các chuyên đề gốc luôn được bảo vệ và đồng bộ với giao diện Tiện ích trên điện thoại. Đồng chí có thể thoải mái thêm/sửa/xóa bài học bên trong hoặc tạo chuyên đề mới.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Category Filters */}
+        <div className="flex flex-wrap items-center gap-2 pt-4">
+          <button
+            onClick={() => setCategoryFilter('ALL')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              categoryFilter === 'ALL'
+                ? 'bg-amber-500 text-slate-950 shadow-sm'
+                : 'bg-white/10 hover:bg-white/20 text-white'
+            }`}
+          >
+            Tất cả ({courses.length})
+          </button>
+
+          <button
+            onClick={() => setCategoryFilter('GDCT')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              categoryFilter === 'GDCT'
+                ? 'bg-blue-500 text-white shadow-sm'
+                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+            }`}
+          >
+            <Lock className="w-3 h-3 text-amber-300" />
+            <span>GDCT</span>
+          </button>
+
+          <button
+            onClick={() => setCategoryFilter('GDPL')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              categoryFilter === 'GDPL'
+                ? 'bg-blue-500 text-white shadow-sm'
+                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+            }`}
+          >
+            <Lock className="w-3 h-3 text-amber-300" />
+            <span>GDPL & TỦ SÁCH PHÁP LUẬT</span>
+          </button>
+
+          <button
+            onClick={() => setCategoryFilter('LICH_SU')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              categoryFilter === 'LICH_SU'
+                ? 'bg-blue-500 text-white shadow-sm'
+                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+            }`}
+          >
+            <Lock className="w-3 h-3 text-amber-300" />
+            <span>Lịch sử truyền thống</span>
+          </button>
+
+          <button
+            onClick={() => setCategoryFilter('BIEN_DAO')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              categoryFilter === 'BIEN_DAO'
+                ? 'bg-blue-500 text-white shadow-sm'
+                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+            }`}
+          >
+            <Lock className="w-3 h-3 text-amber-300" />
+            <span>Biển đảo Việt Nam</span>
+          </button>
+
+          <button
+            onClick={() => setCategoryFilter('CUSTOM')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              categoryFilter === 'CUSTOM'
+                ? 'bg-emerald-500 text-white shadow-sm'
+                : 'bg-white/10 hover:bg-white/20 text-emerald-200'
+            }`}
+          >
+            Chuyên đề mới tạo
           </button>
         </div>
       </div>
@@ -283,7 +413,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             <select
               value={yearFilter}
               onChange={(e) => setYearFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium"
             >
               <option value="ALL">Tất cả các năm</option>
               <option value={2026}>Năm 2026</option>
@@ -296,7 +426,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500"
+              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium"
             >
               <option value="ALL">Tất cả trạng thái</option>
               <option value="PUBLISHED">Công khai</option>
@@ -319,14 +449,20 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             filteredCourses.map((course) => {
               const isExpanded = !!expandedCourseIds[course.id];
               const courseLessons = lessons.filter((l) => l.courseId === course.id && !l.isDeleted);
+              const isFixed = course.isFixed !== undefined ? course.isFixed : isFixedCourse(course);
+              const catDef = getFixedCourseCategory(course);
 
               return (
                 <div
                   key={course.id}
-                  className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden transition-all"
+                  className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${
+                    isFixed ? 'border-blue-200/90 ring-1 ring-blue-500/10' : 'border-slate-200/80'
+                  }`}
                 >
                   {/* Course Header Bar */}
-                  <div className="p-4 lg:p-5 bg-slate-50/80 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200">
+                  <div className={`p-4 lg:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 ${
+                    isFixed ? 'bg-gradient-to-r from-blue-50/60 to-slate-50/80' : 'bg-slate-50/80'
+                  }`}>
                     <div className="flex items-start space-x-3 flex-1 min-w-0">
                       <button
                         onClick={() => toggleCourseExpand(course.id)}
@@ -341,12 +477,30 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
+                          {isFixed ? (
+                            <>
+                              <span className="text-[10px] font-extrabold uppercase bg-blue-700 text-white px-2 py-0.5 rounded shadow-sm flex items-center gap-1">
+                                <Lock className="w-3 h-3 text-amber-300" />
+                                CỐ ĐỊNH (TIỆN ÍCH APP)
+                              </span>
+                              {catDef && (
+                                <span className="text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded">
+                                  {catDef.shortTitle}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded shadow-sm">
+                              CHUYÊN ĐỀ MỚI TẠO
+                            </span>
+                          )}
+
                           <span className="text-[10px] font-extrabold uppercase bg-amber-500 text-slate-950 px-2 py-0.5 rounded shadow-sm">
-                            CHUYÊN ĐỀ {course.year}
+                            NĂM {course.year}
                           </span>
                           {course.code && (
-                            <span className="text-[10px] font-mono font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded border border-amber-300">
-                              Mã khóa: {course.code}
+                            <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-300">
+                              Mã: {course.code}
                             </span>
                           )}
                           <span className="text-[10px] font-mono text-slate-600 bg-slate-200/70 px-1.5 py-0.5 rounded border border-slate-300">
@@ -369,8 +523,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                           </span>
                         </div>
 
-                        <h3 className="text-base font-bold text-slate-900 mt-1 truncate">
-                          {course.title}
+                        <h3 className="text-base font-bold text-slate-900 mt-1 truncate flex items-center gap-2">
+                          <span>{course.title}</span>
+                          {isFixed && (
+                            <span title="Chuyên đề cố định đồng bộ Tiện ích App" className="text-blue-600">
+                              <ShieldCheck className="w-4 h-4 inline" />
+                            </span>
+                          )}
                         </h3>
                         <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">
                           {course.description || 'Chương trình giáo dục chính trị Vùng 4 Hải Quân.'}
@@ -396,13 +555,22 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                         <Edit3 className="w-4 h-4" />
                       </button>
 
-                      <button
-                        onClick={() => handleConfirmDeleteCourse(course)}
-                        title="Xóa vĩnh viễn chuyên đề"
-                        className="p-2 rounded-xl bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 transition-colors shadow-sm"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {isFixed ? (
+                        <div
+                          title="Chuyên đề cố định đồng bộ Tiện ích App (Không thể xóa)"
+                          className="p-2 rounded-xl bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed shadow-sm flex items-center justify-center opacity-60"
+                        >
+                          <Lock className="w-4 h-4 text-slate-400" />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => handleConfirmDeleteCourse(course)}
+                          title="Xóa chuyên đề mới tạo"
+                          className="p-2 rounded-xl bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 transition-colors shadow-sm"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -450,7 +618,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                                     <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                       v{lesson.version}
                                     </span>
-                                     <span
+                                    <span
                                       className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                                         lesson.status === 'PUBLISHED'
                                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -524,7 +692,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
                                 <button
                                   onClick={() => handleConfirmDeleteLesson(lesson)}
-                                  title="Xóa vĩnh viễn bài học"
+                                  title="Xóa bài học"
                                   className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-rose-600 border border-slate-200 transition-colors"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -627,6 +795,26 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Khóa cố định chống xóa */}
+              <div className="bg-amber-50/80 border border-amber-200/90 rounded-2xl p-3.5 flex items-start space-x-3">
+                <input
+                  type="checkbox"
+                  id="isFixedCourseCheckbox"
+                  checked={courseFormData.isFixed}
+                  onChange={(e) => setCourseFormData({ ...courseFormData, isFixed: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                />
+                <label htmlFor="isFixedCourseCheckbox" className="cursor-pointer select-none">
+                  <div className="font-bold text-slate-900 flex items-center gap-1.5 text-xs">
+                    <Lock className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Khóa cố định chuyên đề này (Bảo vệ tránh xóa nhầm)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    Khi bật tùy chọn này, chuyên đề sẽ được bảo vệ cố định trên hệ thống và ứng dụng di động, không ai có thể bấm xóa nhầm chuyên đề.
+                  </p>
+                </label>
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
