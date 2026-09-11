@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Radio, 
-  Bell, 
   Search, 
   CheckCircle2, 
   RefreshCw,
@@ -24,6 +23,7 @@ interface HeaderProps {
   onOpenTrash?: () => void;
   adminUser?: { email: string; name: string; role: string } | null;
   onLogout?: () => void;
+  onSelectTab?: (tab: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,11 +37,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTrash,
   adminUser,
   onLogout,
+  onSelectTab,
 }) => {
-  const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState('');
   const isLive = isRealtimeConnected ?? realtimeConnected ?? true;
-  const safeNotifs = notifications || [];
 
   useEffect(() => {
     const updateTime = () => {
@@ -64,10 +63,12 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   return (
-    <header className="h-18 bg-[#0F223D] text-white border-b border-slate-700/60 px-6 flex items-center justify-between shadow-sm relative z-20 overflow-hidden">
-      {/* Background Subtle Drum */}
-      <div className="absolute right-1/4 -top-12 pointer-events-none opacity-5">
-        <DongSonDrum className="w-48 h-48" color="#F59E0B" opacity={1} />
+    <header className="h-18 shrink-0 bg-[#0F223D] text-white border-b border-slate-700/60 px-6 flex items-center justify-between shadow-sm relative z-30">
+      {/* Background Subtle Drum (contained within overlay to not clip dropdowns) */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute right-1/4 -top-12 opacity-5">
+          <DongSonDrum className="w-48 h-48" color="#F59E0B" opacity={1} />
+        </div>
       </div>
 
       {/* Left: Title & Live indicator */}
@@ -123,50 +124,6 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <RefreshCw className="w-4 h-4" />
         </button>
-
-        {/* Notifications Popover */}
-        <div className="relative">
-          <button
-            id="header-notifications-btn"
-            onClick={() => setShowNotifMenu(!showNotifMenu)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-600/60 transition-colors relative"
-          >
-            <Bell className="w-4 h-4" />
-            {safeNotifs.length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-400 text-slate-950 text-[10px] font-extrabold rounded-full flex items-center justify-center">
-                {safeNotifs.length}
-              </span>
-            )}
-          </button>
-
-          {showNotifMenu && (
-            <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in">
-              <div className="p-3 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-300 uppercase tracking-wider">
-                  Chỉ thị & Thông báo mới
-                </span>
-                <span className="text-[10px] text-slate-400">{safeNotifs.length} thông báo</span>
-              </div>
-              <div className="max-h-72 overflow-y-auto divide-y divide-slate-800">
-                {safeNotifs.map((n) => (
-                  <div key={n.id} className="p-3 hover:bg-slate-800/50 transition-colors">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-bold text-slate-200 truncate">{n.title}</span>
-                      <span className="text-[9px] bg-slate-800 text-amber-300 px-1.5 py-0.5 rounded font-medium border border-slate-700">
-                        {n.type === 'EMERGENCY' ? 'Khẩn cấp' : n.type === 'COURSE_UPDATE' ? 'Cập nhật' : 'Chỉ đạo'}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-slate-300 line-clamp-2">{n.content}</p>
-                    <div className="mt-1 text-[9px] text-slate-400 flex items-center justify-between">
-                      <span>{n.sentBy}</span>
-                      <span>{new Date(n.createdAt).toLocaleDateString('vi-VN')}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
 
         {/* Current Officer Profile & Logout */}
         <div className="flex items-center space-x-3 pl-3 border-l border-slate-700">

@@ -83,6 +83,23 @@ function sanitizeFirestoreData(data: any): any {
   return clean;
 }
 
+// Helper to extract a timestamp number for safe, crash-proof sorting of Dates, strings, numbers or Firestore Timestamps
+export function getSafeTimestamp(val: any): number {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const t = Date.parse(val);
+    return isNaN(t) ? 0 : t;
+  }
+  if (val && typeof val.toDate === 'function') {
+    return val.toDate().getTime();
+  }
+  if (val instanceof Date) {
+    return val.getTime();
+  }
+  return 0;
+}
+
 export const firestoreService = {
   // -------------------------------------------------------------
   // HEALTH & STATUS CHECK
@@ -1501,9 +1518,9 @@ export const firestoreService = {
 
       const progressList = progSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserProgress);
       const examSubmissions = subSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as ExamSubmission)
-        .sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+        .sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
       const feedbacks = fbSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserFeedback)
-        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        .sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
       const sectionProgressList = secSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserSectionProgress);
 
       return {
@@ -2593,7 +2610,7 @@ export const firestoreService = {
     try {
       const colRef = collection(db, 'exam_banks');
       const snap = await getDocs(colRef);
-      return snap.docs.map(d => d.data() as ExamBank).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return snap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as ExamBank).sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
     } catch (err) {
       console.warn('[getExamBanks error]:', err);
       return [];
@@ -2604,12 +2621,12 @@ export const firestoreService = {
     try {
       const snap = await getDoc(doc(db, 'exam_banks', id));
       if (!snap.exists()) return null;
-      const bank = snap.data() as ExamBank;
+      const bank = { ...(snap.data() as any), id: snap.id } as ExamBank;
       if (bank.questions && bank.questions.length > 0) {
         return bank;
       }
       const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', id)));
-      const questions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
+      const questions = qSnap.docs.map(d => ({ ...(d.data() as any), id: d.id } as ExamQuestion)).sort((a, b) => a.stt - b.stt);
       return { ...bank, questions };
     } catch (err) {
       console.warn('[getExamBank error]:', err);
@@ -2622,7 +2639,7 @@ export const firestoreService = {
       const colRef = collection(db, 'exam_banks');
       return onSnapshot(colRef, (snapshot) => {
         const banks = snapshot.docs.map(d => ({ ...d.data(), id: d.id }) as ExamBank);
-        banks.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        banks.sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
         callback(banks);
       }, (err) => {
         console.warn('[listenExamBanks warning]:', err);
@@ -2792,7 +2809,7 @@ export const firestoreService = {
         list = [sampleSession];
       }
 
-      return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      return list.sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
     } catch (err) {
       console.warn('[getExamSessions error]:', err);
       return [];
@@ -2830,6 +2847,7 @@ export const firestoreService = {
       durationMinutes: Number(data.durationMinutes) || 20,
       passScore: Number(data.passScore) || 5.0,
       totalQuestions: selectedQuestions.length,
+      maxAttempts: data.maxAttempts !== undefined ? Number(data.maxAttempts) : 1,
       questions: selectedQuestions,
       targetUnit: data.targetUnit || 'ALL',
       status: data.status || 'ACTIVE',
@@ -2968,7 +2986,7 @@ export const firestoreService = {
     const colRef = collection(db, 'exam_sessions');
     return onSnapshot(colRef, (snapshot) => {
       const sessions = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ExamSession));
-      sessions.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      sessions.sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
       callback(sessions);
     }, (err) => {
       console.warn('[listenExamSessions warning]:', err);
@@ -2998,8 +3016,147 @@ export const firestoreService = {
     }
   },
 
+  syncLegacyUserSubmissions: async (): Promise<void> => {
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const subsSnap = await getDocs(collection(db, 'exam_submissions'));
+      const sessionsSnap = await getDocs(collection(db, 'exam_sessions')).catch(() => null);
+      
+      const sessionsList = sessionsSnap 
+        ? sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
+        : [];
+
+      const getSessionTimestamp = (s: any) => {
+        if (s.createdAt) {
+          const t = typeof s.createdAt === 'number' ? s.createdAt : new Date(s.createdAt).getTime();
+          if (!isNaN(t)) return t;
+        }
+        const match = s.id.match(/\d+/);
+        if (match) {
+          return parseInt(match[0]);
+        }
+        return 0;
+      };
+
+      const existingSubsMap = new Map<string, any>();
+      subsSnap.docs.forEach(d => {
+        const s = d.data();
+        if (s.userId) {
+          existingSubsMap.set(s.userId, { id: d.id, ...s });
+        }
+      });
+
+      const batch = writeBatch(db);
+      let batchCount = 0;
+
+      usersSnap.docs.forEach(d => {
+        const u = { ...(d.data() as any), id: d.id } as User;
+        
+        // Check if user has exam results
+        const hasExamStats = 
+          (u as any).totalExamsCount > 0 || 
+          (u as any).lastExamScore !== undefined || 
+          (u as any).lastScore !== undefined ||
+          (u as any).lastExamTime !== undefined;
+
+        if (hasExamStats) {
+          const existingSub = existingSubsMap.get(u.id);
+          
+          let score = 0;
+          let totalQuestions = 10;
+          let correctCount = 0;
+          
+          if ((u as any).lastExamScore !== undefined) {
+            totalQuestions = (u as any).lastExamTotal || 10;
+            correctCount = Number((u as any).lastExamScore || 0);
+            score = totalQuestions > 0 ? (correctCount / totalQuestions) * 10 : correctCount;
+          } else if ((u as any).lastScore !== undefined) {
+            totalQuestions = 10;
+            const percentage = (u as any).lastScorePercentage || 0;
+            score = percentage > 0 ? (percentage / 10) : Number((u as any).lastScore || 0);
+            correctCount = Math.round((score / 10) * totalQuestions);
+          }
+
+          const passed = (u as any).lastExamPassed !== undefined 
+            ? (u as any).lastExamPassed 
+            : (score >= 5.0);
+
+          let submittedAt = new Date().toISOString();
+          const examTimeNum = (u as any).lastExamTime;
+          if (examTimeNum) {
+            submittedAt = new Date(examTimeNum).toISOString();
+          } else if (u.updatedAt) {
+            submittedAt = typeof u.updatedAt === 'string' ? u.updatedAt : new Date(u.updatedAt).toISOString();
+          } else if (u.createdAt) {
+            submittedAt = typeof u.createdAt === 'string' ? u.createdAt : new Date(u.createdAt).toISOString();
+          }
+
+          // Resolve which session/lesson this exam belongs to
+          let resolvedSessionId = (u as any).lastLessonId || 'session-default';
+          let resolvedSessionTitle = (u as any).lastLessonTitle || 'Kiểm tra nhận thức';
+
+          if (examTimeNum && sessionsList.length > 0) {
+            // Find session created before or very close to examTime
+            const candidates = sessionsList.filter(s => {
+              const sTime = getSessionTimestamp(s);
+              return sTime <= examTimeNum + 60000;
+            });
+
+            if (candidates.length > 0) {
+              candidates.sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
+              const bestSession = candidates[0];
+              resolvedSessionId = bestSession.id;
+              resolvedSessionTitle = bestSession.title || 'Đợt kiểm tra';
+            }
+          }
+
+          // Determine if we should create or update the synced submission
+          const shouldUpdate = !existingSub || 
+            existingSub.submittedAt !== submittedAt || 
+            existingSub.score !== Number(score.toFixed(1)) ||
+            existingSub.sessionId !== resolvedSessionId;
+
+          if (shouldUpdate) {
+            const id = `sub-sync-${u.id}`;
+            const submissionPayload = {
+              id,
+              sessionId: resolvedSessionId,
+              sessionTitle: resolvedSessionTitle,
+              userId: u.id,
+              userName: u.fullName || u.name || 'Quân nhân',
+              userRank: u.rank || '—',
+              userPosition: u.position || '—',
+              unitName: u.unitName || u.unit || 'Chưa xếp đơn vị',
+              score: Number(score.toFixed(1)),
+              correctCount,
+              totalQuestions,
+              passed,
+              timeSpentSeconds: 600, // Default to 10 mins if not tracked
+              answers: [],
+              submittedAt
+            };
+
+            const docRef = doc(db, 'exam_submissions', id);
+            batch.set(docRef, submissionPayload, { merge: true });
+            batchCount++;
+          }
+        }
+      });
+
+      if (batchCount > 0) {
+        console.log(`[syncLegacyUserSubmissions]: Auto-syncing/updating ${batchCount} user exam submissions to Firestore...`);
+        await batch.commit();
+      }
+    } catch (err) {
+      console.warn('[syncLegacyUserSubmissions error]:', err);
+    }
+  },
+
   getExamSubmissions: async (sessionId?: string): Promise<ExamSubmission[]> => {
     try {
+      // Sync legacy user submissions in background
+      await firestoreService.syncLegacyUserSubmissions().catch(() => {});
+      
       // Clean up legacy sample submissions to ensure only real submissions are used
       await firestoreService.cleanSampleSubmissionsIfNeeded().catch(() => {});
 
@@ -3044,7 +3201,7 @@ export const firestoreService = {
         } as ExamSubmission;
       });
 
-      return subs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+      return subs.sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
     } catch (err) {
       console.warn('[getExamSubmissions error]:', err);
       return [];
@@ -3104,6 +3261,9 @@ export const firestoreService = {
   },
 
   listenExamSubmissions: (sessionId: string | undefined, callback: (subs: ExamSubmission[]) => void) => {
+    // Run self-healing legacy user profile submissions synchronization in the background
+    firestoreService.syncLegacyUserSubmissions().catch(() => {});
+
     const colRef = collection(db, 'exam_submissions');
     let q;
     if (sessionId && sessionId !== 'ALL') {
@@ -3144,7 +3304,7 @@ export const firestoreService = {
         } as ExamSubmission;
       });
 
-      subs.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+      subs.sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
       callback(subs);
     }, (err) => {
       console.warn('[listenExamSubmissions warning]:', err);
@@ -3159,7 +3319,7 @@ export const firestoreService = {
     try {
       const colRef = collection(db, 'feedbacks');
       const snap = await getDocs(colRef);
-      let list = snap.docs.map(d => d.data() as UserFeedback);
+      let list = snap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserFeedback);
       
       const flagRef = doc(db, 'system_meta', 'init_flags');
       const flagSnap = await getDoc(flagRef);
@@ -3226,7 +3386,7 @@ export const firestoreService = {
         list = sampleFeedbacks;
       }
 
-      return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      return list.sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
     } catch (err) {
       console.warn('[getFeedbacks error]:', err);
       return [];
@@ -3264,20 +3424,120 @@ export const firestoreService = {
     const snap = await getDoc(docRef);
     if (!snap.exists()) throw new Error(`Không tìm thấy phản ánh ID: ${id}`);
 
-    const existing = snap.data() as UserFeedback;
+    const existing = snap.data() as any;
     const now = new Date().toISOString();
-    const updatePayload: Partial<UserFeedback> = {
+    const timestampNow = Date.now();
+    const responseSender = respondedBy || 'Ban Tuyên Huấn - Vùng 4 Hải Quân';
+
+    // 1. Build comprehensive payload with all possible field variations for mobile apps
+    const updatePayload: Record<string, any> = {
       status,
-      updatedAt: now
+      statusLower: status.toLowerCase(),
+      status_vn: status === 'RESOLVED' ? 'Đã xử lý' : (status === 'RECEIVED' ? 'Đã tiếp nhận' : 'Đang xử lý'),
+      updatedAt: now,
+      updatedAtTimestamp: timestampNow,
+      timestamp: timestampNow
     };
 
     if (adminResponse !== undefined) {
       updatePayload.adminResponse = adminResponse;
-      updatePayload.respondedBy = respondedBy || 'Ban Quản Trị Vùng 4';
+      updatePayload.response = adminResponse;
+      updatePayload.reply = adminResponse;
+      updatePayload.adminReply = adminResponse;
+      updatePayload.feedbackResponse = adminResponse;
+      updatePayload.feedbackReply = adminResponse;
+      updatePayload.traLoi = adminResponse;
+      updatePayload.phanHoi = adminResponse;
+      updatePayload.answer = adminResponse;
+      updatePayload.respondedBy = responseSender;
+      updatePayload.replyBy = responseSender;
+      updatePayload.nguoiTraLoi = responseSender;
       updatePayload.respondedAt = now;
+      updatePayload.replyTime = timestampNow;
+      updatePayload.respondedAtTimestamp = timestampNow;
+      updatePayload.hasNewReply = true;
+      updatePayload.isReplied = true;
+      updatePayload.daPhanHoi = true;
+    }
+
+    if (status === 'RESOLVED') {
+      updatePayload.isResolved = true;
+      updatePayload.daXuLy = true;
     }
 
     await updateDoc(docRef, updatePayload);
+
+    // Also mirror to user_feedbacks if applicable
+    try {
+      await setDoc(doc(db, 'user_feedbacks', id), { ...existing, ...updatePayload }, { merge: true });
+    } catch (err) {
+      console.warn('Mirror to user_feedbacks skipped:', err);
+    }
+
+    // 2. Dispatch real notification so the Mobile App / User receives it
+    try {
+      const notifId = `notif-fb-${timestampNow}-${Math.random().toString(36).substring(2, 6)}`;
+      const targetUser = existing.userName || 'Đồng chí';
+      const feedbackTopic = existing.title || existing.examName || existing.content || existing.feedback || 'Phản ánh nội dung';
+      
+      const notifTitle = `[Phản hồi] Ban Quản Trị đã trả lời phản ánh`;
+      const notifContent = adminResponse 
+        ? `Kính gửi ${targetUser}: Ban Quản Trị (${responseSender}) đã phản hồi phản ánh về "${feedbackTopic.slice(0, 80)}": "${adminResponse}"`
+        : `Phản ánh của ${targetUser} về "${feedbackTopic.slice(0, 80)}" đã được cập nhật trạng thái: ${status === 'RESOLVED' ? 'Đã xử lý' : status}`;
+
+      const notifPayload: any = {
+        id: notifId,
+        title: notifTitle,
+        content: notifContent,
+        message: notifContent,
+        body: notifContent,
+        type: 'SYSTEM',
+        priority: 'HIGH',
+        targetUnitId: existing.unitId || existing.unitName || 'ALL',
+        targetUnit: existing.unitName || 'ALL',
+        sentBy: responseSender,
+        sender: responseSender,
+        userId: existing.userId || '',
+        targetUserId: existing.userId || '',
+        userEmail: existing.userEmail || '',
+        targetUserEmail: existing.userEmail || '',
+        userName: existing.userName || '',
+        feedbackId: id,
+        feedbackTitle: feedbackTopic,
+        adminResponse: adminResponse || '',
+        response: adminResponse || '',
+        reply: adminResponse || '',
+        isRead: false,
+        read: false,
+        status: 'UNREAD',
+        createdAt: now,
+        timestamp: timestampNow,
+        createdAtTimestamp: timestampNow,
+        updatedAt: now
+      };
+
+      // 2a. Write to main notifications collection (read by mobile apps & web)
+      await setDoc(doc(db, 'notifications', notifId), notifPayload);
+
+      // 2b. Write to user-specific subcollection if userId is available
+      if (existing.userId) {
+        try {
+          await setDoc(doc(db, `users/${existing.userId}/notifications`, notifId), notifPayload);
+        } catch (subErr) {
+          console.warn('Could not write to user subcollection:', subErr);
+        }
+
+        // 2c. Write to user_notifications root collection
+        try {
+          await setDoc(doc(db, 'user_notifications', notifId), notifPayload);
+        } catch (uErr) {
+          console.warn('Could not write to user_notifications:', uErr);
+        }
+      }
+    } catch (notifErr) {
+      console.error('[updateFeedbackStatus notification dispatch error]:', notifErr);
+    }
+
     return { ...existing, ...updatePayload };
   },
 
@@ -3289,8 +3549,8 @@ export const firestoreService = {
   listenFeedbacks: (callback: (feedbacks: UserFeedback[]) => void) => {
     const colRef = collection(db, 'feedbacks');
     return onSnapshot(colRef, (snapshot) => {
-      const list = snapshot.docs.map(d => d.data() as UserFeedback);
-      list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserFeedback);
+      list.sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
       callback(list);
     }, (err) => {
       console.warn('[listenFeedbacks warning]:', err);

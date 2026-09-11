@@ -794,6 +794,7 @@ export interface ExamSession {
   durationMinutes: number;          // Thời gian làm bài (phút), vd: 20
   passScore: number;                // Điểm đạt (trên thang điểm 10), vd: 5.0
   totalQuestions: number;
+  maxAttempts?: number;             // Số lượt thi tối đa cho mỗi tài khoản, vd: 1 (0 hoặc undefined là không giới hạn)
   questions?: ExamQuestion[];        // Toàn bộ bộ câu hỏi đẩy lên App di động
   targetUnit: string;               // 'ALL' hoặc tên Đơn vị cụ thể
   status: 'DRAFT' | 'ACTIVE' | 'COMPLETED'; // Trạng thái đợt kiểm tra

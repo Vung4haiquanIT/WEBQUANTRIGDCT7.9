@@ -36,6 +36,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<ExamSession | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<ExamSession | null>(null);
+  const [bankToDelete, setBankToDelete] = useState<ExamBank | null>(null);
   const [reportViewMode, setReportViewMode] = useState<'unit' | 'candidate' | 'account'>('unit');
   const [selectedBankForDetail, setSelectedBankForDetail] = useState<ExamBank | null>(null);
   const [selectedSessionForReport, setSelectedSessionForReport] = useState<ExamSession | null>(null);
@@ -179,6 +180,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     durationMinutes: 20,
     passScore: 5.0,
     totalQuestions: 20,
+    maxAttempts: 1,
     targetUnit: 'ALL',
     status: 'ACTIVE' as 'ACTIVE' | 'COMPLETED' | 'DRAFT'
   });
@@ -277,8 +279,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   };
 
   // Handle Delete Bank
-  const handleDeleteBank = async (bankId: string, bankTitle: string) => {
-    if (!confirm(`Đồng chí có chắc chắn muốn xóa Bộ đề "${bankTitle}" không?`)) return;
+  const handleRequestDeleteBank = (bank: ExamBank) => {
+    setBankToDelete(bank);
+  };
+
+  const confirmDeleteBank = async (bank: ExamBank) => {
+    const bankId = bank.id;
+    setBankToDelete(null);
     try {
       await api.deleteExamBank(bankId);
       loadAllData();
@@ -303,6 +310,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       durationMinutes: 20,
       passScore: 5.0,
       totalQuestions: 20,
+      maxAttempts: 1,
       targetUnit: 'ALL',
       status: 'ACTIVE'
     });
@@ -319,6 +327,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       durationMinutes: session.durationMinutes || 20,
       passScore: session.passScore || 5.0,
       totalQuestions: session.totalQuestions || 20,
+      maxAttempts: session.maxAttempts !== undefined ? session.maxAttempts : 1,
       targetUnit: session.targetUnit || 'ALL',
       status: session.status || 'ACTIVE'
     });
@@ -361,6 +370,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
           totalQuestions: selectedQuestions.length,
+          maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 1,
           questions: selectedQuestions,
           targetUnit: sessionFormData.targetUnit,
           status: sessionFormData.status,
@@ -377,6 +387,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
           totalQuestions: selectedQuestions.length,
+          maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 1,
           questions: selectedQuestions,
           targetUnit: sessionFormData.targetUnit,
           status: sessionFormData.status,
@@ -396,6 +407,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
         durationMinutes: 20,
         passScore: 5.0,
         totalQuestions: 20,
+        maxAttempts: 1,
         targetUnit: 'ALL',
         status: 'ACTIVE'
       });
@@ -446,6 +458,48 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       alert(`Lỗi khi xóa đợt kiểm tra: ${err?.message || 'Không thể kết nối'}`);
       loadAllData();
     }
+  };
+
+  // Helper to count attempts for currently logged-in user in a session
+  const getUserAttemptsForSession = (session: ExamSession) => {
+    if (!currentUser) return 0;
+    const uId = currentUser.id;
+    const uName = currentUser.name || currentUser.fullName;
+    
+    // Real submissions count
+    const realSubsCount = submissions.filter(s => 
+      s.sessionId === session.id && 
+      (s.userId === uId || (s.userName && s.userName === uName))
+    ).length;
+
+    // Legacy/profile count if their last exam was for this session and there's no real submission
+    let legacyCount = 0;
+    if (realSubsCount === 0) {
+      const uDoc = users.find(u => u.id === uId);
+      if (uDoc) {
+        let sessionTimestamp = 0;
+        const match = session.id.match(/\d+/);
+        if (match) {
+          sessionTimestamp = parseInt(match[0]);
+        }
+        const isLastExamForThisSession = 
+          (uDoc as any).lastExamTime && 
+          sessionTimestamp > 0 && 
+          ((uDoc as any).lastExamTime >= sessionTimestamp - 60000);
+
+        if (isLastExamForThisSession) {
+          legacyCount = Number((uDoc as any).totalExamsCount || 1);
+        }
+      }
+    }
+
+    return Math.max(realSubsCount, legacyCount);
+  };
+
+  const isAttemptsExhausted = (session: ExamSession) => {
+    if (!session.maxAttempts || session.maxAttempts <= 0) return false;
+    const attempts = getUserAttemptsForSession(session);
+    return attempts >= session.maxAttempts;
   };
 
   // Start Mobile App Test Simulator
@@ -556,6 +610,121 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     });
   }, [submissions, selectedSessionFilter, selectedUnitFilter, searchCandidateQuery]);
 
+  const filteredUsersForReport = useMemo(() => {
+    return users.filter(u => {
+      const uUnit = u.unitName || u.unit || '';
+      const matchUnit = selectedUnitFilter === 'ALL' || uUnit === selectedUnitFilter;
+      
+      const displayName = u.fullName || u.name || '';
+      const email = u.email || '';
+      const matchSearch = searchCandidateQuery === '' || 
+        displayName.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
+        email.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
+        uUnit.toLowerCase().includes(searchCandidateQuery.toLowerCase());
+
+      return matchUnit && matchSearch;
+    });
+  }, [users, selectedUnitFilter, searchCandidateQuery]);
+
+  const accountReportData = useMemo(() => {
+    // Extract session timestamp of selectedSessionFilter if any
+    let sessionTimestamp = 0;
+    let selectedSessionTitle = '';
+    if (selectedSessionFilter && selectedSessionFilter !== 'ALL') {
+      const match = selectedSessionFilter.match(/\d+/);
+      if (match) {
+        sessionTimestamp = parseInt(match[0]);
+      }
+      const sess = sessions.find(s => s.id === selectedSessionFilter || s.title === selectedSessionFilter);
+      if (sess) {
+        selectedSessionTitle = sess.title;
+      }
+    }
+
+    return filteredUsersForReport.map(u => {
+      const userProgress = progressList.filter(p => p.userId === u.id);
+      const totalLessons = userProgress.length;
+      const completedLessons = userProgress.filter(p => p.completed).length;
+      const avgProgress = totalLessons > 0 
+        ? Math.round(userProgress.reduce((sum, p) => sum + (p.overallProgress || 0), 0) / totalLessons)
+        : 0;
+
+      // Real submissions matching selected filters
+      const userSubs = submissions.filter(s => {
+        const isUserMatch = s.userId === u.id || (s.userName && s.userName === (u.fullName || u.name));
+        const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
+        return isUserMatch && matchSession;
+      });
+
+      // Historical/Legacy values
+      const totalExamsCount = Number((u as any).totalExamsCount || 0);
+      const passedExamsCount = Number((u as any).passedExamsCount || 0);
+
+      // Check if user's last exam was taken for this specific session
+      const isLastExamForThisSession = 
+        selectedSessionFilter !== 'ALL' && 
+        selectedSessionFilter && 
+        (u as any).lastExamTime && 
+        sessionTimestamp > 0 && 
+        ((u as any).lastExamTime >= sessionTimestamp - 60000);
+
+      // We include legacy/profile stats for this user if we are showing ALL sessions, OR if their last exam corresponds to the selected session
+      const includeLegacy = selectedSessionFilter === 'ALL' || !selectedSessionFilter || isLastExamForThisSession;
+      
+      const examCount = includeLegacy ? Math.max(userSubs.length, totalExamsCount) : userSubs.length;
+      const passedCount = includeLegacy ? Math.max(userSubs.filter(s => s.passed).length, passedExamsCount) : userSubs.filter(s => s.passed).length;
+
+      // Highest score calculation
+      let highestScore = userSubs.length > 0 ? Math.max(...userSubs.map(s => s.score)) : 0;
+      if (includeLegacy) {
+        if ((u as any).lastExamScore !== undefined) {
+          const lastExamTotal = (u as any).lastExamTotal || 10;
+          const lastExamScore = Number((u as any).lastExamScore || 0);
+          const scoreVal = lastExamTotal > 0 ? (lastExamScore / lastExamTotal) * 10 : lastExamScore;
+          highestScore = Math.max(highestScore, scoreVal);
+        }
+        if ((u as any).lastScore !== undefined) {
+          const percentage = (u as any).lastScorePercentage || 0;
+          const scoreVal = percentage > 0 ? (percentage / 10) : Number((u as any).lastScore || 0);
+          highestScore = Math.max(highestScore, scoreVal);
+        }
+      }
+
+      // Generate text describing the exam history
+      let examSummaryText = userSubs.map(s => {
+        return `${s.sessionTitle || 'Đợt kiểm tra'}: ${s.score}đ (${s.passed ? 'Đạt' : 'Chưa đạt'})`;
+      }).join('; ');
+
+      if (examSummaryText === '' && includeLegacy && ((u as any).lastExamScore !== undefined || (u as any).lastScore !== undefined)) {
+        let lastScoreStr = '';
+        if ((u as any).lastExamScore !== undefined) {
+          const lastExamTotal = (u as any).lastExamTotal || 10;
+          lastScoreStr = `${(u as any).lastExamScore}/${lastExamTotal}`;
+        } else if ((u as any).lastScore !== undefined) {
+          lastScoreStr = `${(u as any).lastScore}/10`;
+        }
+        
+        const passed = (u as any).lastExamPassed !== false;
+        const sTitle = selectedSessionTitle || (u as any).lastLessonTitle || 'Đợt kiểm tra';
+        examSummaryText = `${sTitle}: ${lastScoreStr}đ (${passed ? 'Đạt' : 'Chưa đạt'})`;
+      }
+
+      return {
+        user: u,
+        totalLessons,
+        completedLessons,
+        avgProgress,
+        examCount,
+        highestScore,
+        passedCount,
+        examSummaryText,
+        unitName: u.unitName || u.unit || 'Chưa xếp đơn vị',
+        rank: u.rank || u.userRank || '—',
+        position: u.position || u.userPosition || '—'
+      };
+    });
+  }, [filteredUsersForReport, progressList, submissions, selectedSessionFilter, sessions]);
+
   // Aggregate stats per Unit for detailed score report
   const unitStatsList = useMemo(() => {
     const map: Record<string, {
@@ -593,8 +762,8 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       });
     }
 
-    filteredReportSubmissions.forEach(s => {
-      const uName = s.unitName || 'Chưa phân đơn vị';
+    accountReportData.forEach(d => {
+      const uName = d.unitName || 'Chưa xếp đơn vị';
       if (!map[uName]) {
         map[uName] = {
           unitName: uName,
@@ -610,17 +779,51 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           poorCount: 0
         };
       }
+      
       const stat = map[uName];
-      stat.total += 1;
-      if (s.passed) stat.passed += 1; else stat.failed += 1;
-      stat.sumScore += Number(s.score || 0);
-      if (s.score > stat.maxScore) stat.maxScore = s.score;
-      if (s.score < stat.minScore) stat.minScore = s.score;
+      stat.total += d.examCount;
+      stat.passed += d.passedCount;
+      stat.failed += (d.examCount - d.passedCount);
 
-      if (s.score >= 8.0) stat.excellentCount += 1;
-      else if (s.score >= 6.5) stat.goodCount += 1;
-      else if (s.score >= 5.0) stat.averageCount += 1;
-      else stat.poorCount += 1;
+      const userSubs = submissions.filter(s => {
+        const isUserMatch = s.userId === d.user.id || (s.userName && s.userName === (d.user.fullName || d.user.name));
+        const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
+        return isUserMatch && matchSession;
+      });
+
+      if (userSubs.length > 0) {
+        userSubs.forEach(s => {
+          stat.sumScore += s.score;
+          if (s.score > stat.maxScore) stat.maxScore = s.score;
+          if (s.score < stat.minScore) stat.minScore = s.score;
+
+          if (s.score >= 8.0) stat.excellentCount += 1;
+          else if (s.score >= 6.5) stat.goodCount += 1;
+          else if (s.score >= 5.0) stat.averageCount += 1;
+          else stat.poorCount += 1;
+        });
+
+        const extraAttempts = d.examCount - userSubs.length;
+        if (extraAttempts > 0) {
+          stat.sumScore += d.highestScore * extraAttempts;
+          if (d.highestScore > stat.maxScore) stat.maxScore = d.highestScore;
+          if (d.highestScore < stat.minScore) stat.minScore = d.highestScore;
+
+          if (d.highestScore >= 8.0) stat.excellentCount += extraAttempts;
+          else if (d.highestScore >= 6.5) stat.goodCount += extraAttempts;
+          else if (d.highestScore >= 5.0) stat.averageCount += extraAttempts;
+          else stat.poorCount += extraAttempts;
+        }
+      } else if (d.examCount > 0) {
+        stat.sumScore += d.highestScore * d.examCount;
+        if (d.highestScore > stat.maxScore) stat.maxScore = d.highestScore;
+        if (d.highestScore < stat.minScore) stat.minScore = d.highestScore;
+
+        if (d.highestScore >= 8.0) stat.excellentCount += d.examCount;
+        else if (d.highestScore >= 6.5) stat.goodCount += d.examCount;
+        else if (d.highestScore >= 5.0) stat.averageCount += d.examCount;
+        else stat.poorCount += d.examCount;
+      }
     });
 
     return Object.values(map)
@@ -650,63 +853,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           avgScoreNum,
           avgScore,
           passRate,
-          minScoreDisplay: u.total > 0 ? u.minScore : 0,
+          minScoreDisplay: u.total > 0 && u.minScore !== 10 ? u.minScore : 0,
           rankLabel,
           rankColor
         };
       })
       .sort((a, b) => b.passRate - a.passRate || b.avgScoreNum - a.avgScoreNum);
-  }, [filteredReportSubmissions, units, selectedUnitFilter]);
-
-  const filteredUsersForReport = useMemo(() => {
-    return users.filter(u => {
-      const uUnit = u.unitName || u.unit || '';
-      const matchUnit = selectedUnitFilter === 'ALL' || uUnit === selectedUnitFilter;
-      
-      const displayName = u.fullName || u.name || '';
-      const email = u.email || '';
-      const matchSearch = searchCandidateQuery === '' || 
-        displayName.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        email.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        uUnit.toLowerCase().includes(searchCandidateQuery.toLowerCase());
-
-      return matchUnit && matchSearch;
-    });
-  }, [users, selectedUnitFilter, searchCandidateQuery]);
-
-  const accountReportData = useMemo(() => {
-    return filteredUsersForReport.map(u => {
-      const userProgress = progressList.filter(p => p.userId === u.id);
-      const totalLessons = userProgress.length;
-      const completedLessons = userProgress.filter(p => p.completed).length;
-      const avgProgress = totalLessons > 0 
-        ? Math.round(userProgress.reduce((sum, p) => sum + (p.overallProgress || 0), 0) / totalLessons)
-        : 0;
-
-      const userSubs = submissions.filter(s => s.userId === u.id);
-      const examCount = userSubs.length;
-      const highestScore = examCount > 0 ? Math.max(...userSubs.map(s => s.score)) : 0;
-      const passedCount = userSubs.filter(s => s.passed).length;
-
-      const examSummaryText = userSubs.map(s => {
-        return `${s.sessionTitle || 'Đợt kiểm tra'}: ${s.score}đ (${s.passed ? 'Đạt' : 'Chưa đạt'})`;
-      }).join('; ');
-
-      return {
-        user: u,
-        totalLessons,
-        completedLessons,
-        avgProgress,
-        examCount,
-        highestScore,
-        passedCount,
-        examSummaryText,
-        unitName: u.unitName || u.unit || 'Chưa xếp đơn vị',
-        rank: u.rank || u.userRank || '—',
-        position: u.position || u.userPosition || '—'
-      };
-    });
-  }, [filteredUsersForReport, progressList, submissions]);
+  }, [accountReportData, units, selectedUnitFilter, submissions, selectedSessionFilter]);
 
   const handleExportAccountReportToExcel = () => {
     if (accountReportData.length === 0) {
@@ -807,12 +960,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   };
 
   // Calculate stats for filtered submissions
-  const totalSubmissionsCount = filteredReportSubmissions.length;
-  const passedCount = filteredReportSubmissions.filter(s => s.passed).length;
-  const passRatePercent = totalSubmissionsCount > 0 ? Math.round((passedCount / totalSubmissionsCount) * 100) : 0;
-  const avgScore = totalSubmissionsCount > 0 
-    ? (filteredReportSubmissions.reduce((acc, curr) => acc + curr.score, 0) / totalSubmissionsCount).toFixed(1)
-    : '0.0';
+  const totalSubmissionsCount = useMemo(() => unitStatsList.reduce((acc, curr) => acc + curr.total, 0), [unitStatsList]);
+  const passedCount = useMemo(() => unitStatsList.reduce((acc, curr) => acc + curr.passed, 0), [unitStatsList]);
+  const passRatePercent = useMemo(() => totalSubmissionsCount > 0 ? Math.round((passedCount / totalSubmissionsCount) * 100) : 0, [totalSubmissionsCount, passedCount]);
+  const avgScore = useMemo(() => {
+    const totalSum = unitStatsList.reduce((acc, curr) => acc + curr.sumScore, 0);
+    return totalSubmissionsCount > 0 ? (totalSum / totalSubmissionsCount).toFixed(1) : '0.0';
+  }, [unitStatsList, totalSubmissionsCount]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -976,23 +1130,29 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                         </div>
                       )}
 
-                      <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-100 text-center text-xs">
-                        <div className="bg-slate-50 rounded-xl p-2 border border-slate-200/60">
-                          <span className="block text-[10px] font-bold text-slate-500">Bộ đề / Số câu</span>
+                      <div className="grid grid-cols-4 gap-1.5 mt-3 pt-3 border-t border-slate-100 text-center text-xs">
+                        <div className="bg-slate-50 rounded-xl p-1.5 border border-slate-200/60">
+                          <span className="block text-[9px] font-bold text-slate-500">Số câu hỏi</span>
                           <span className="font-bold text-slate-900 mt-0.5 block truncate" title={`${session.bankTitle || 'Bộ đề'}: ${displayTotalQuestions} câu`}>
-                            {displayTotalQuestions} câu hỏi
+                            {displayTotalQuestions} câu
                           </span>
                         </div>
-                        <div className="bg-slate-50 rounded-xl p-2 border border-slate-200/60">
-                          <span className="block text-[10px] font-bold text-slate-500">Thời gian làm bài</span>
+                        <div className="bg-slate-50 rounded-xl p-1.5 border border-slate-200/60">
+                          <span className="block text-[9px] font-bold text-slate-500">Thời gian</span>
                           <span className="font-bold text-blue-700 mt-0.5 block">
                             {session.durationMinutes} phút
                           </span>
                         </div>
-                        <div className="bg-slate-50 rounded-xl p-2 border border-slate-200/60">
-                          <span className="block text-[10px] font-bold text-slate-500">Lượt nộp bài</span>
+                        <div className="bg-slate-50 rounded-xl p-1.5 border border-slate-200/60">
+                          <span className="block text-[9px] font-bold text-slate-500">Số lượt thi</span>
+                          <span className="font-bold text-amber-700 mt-0.5 block" title="Số lượt thi tối đa">
+                            {session.maxAttempts && session.maxAttempts > 0 ? `${session.maxAttempts} lượt` : 'K.Giới hạn'}
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 rounded-xl p-1.5 border border-slate-200/60">
+                          <span className="block text-[9px] font-bold text-slate-500">Lượt nộp</span>
                           <span className="font-bold text-emerald-700 mt-0.5 block">
-                            {sessionSubs.length} quân nhân
+                            {sessionSubs.length} bài
                           </span>
                         </div>
                       </div>
@@ -1001,13 +1161,24 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     {/* Controls Footer */}
                     <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={() => handleStartTestSimulator(session)}
-                          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all"
-                        >
-                          <Smartphone className="w-3.5 h-3.5" />
-                          <span>Thử sức trên App</span>
-                        </button>
+                        {isAttemptsExhausted(session) ? (
+                          <button
+                            onClick={() => handleStartTestSimulator(session)}
+                            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-500 text-xs font-bold shadow-sm transition-all"
+                            title="Đồng chí đã hoàn thành số lượt thi cho đợt kiểm tra này"
+                          >
+                            <Smartphone className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Đã thi xong (Hết lượt)</span>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleStartTestSimulator(session)}
+                            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all"
+                          >
+                            <Smartphone className="w-3.5 h-3.5" />
+                            <span>Thử sức trên App</span>
+                          </button>
+                        )}
 
                         <button
                           onClick={() => {
@@ -1148,7 +1319,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     </div>
 
                     <button
-                      onClick={() => handleDeleteBank(bank.id, bank.title)}
+                      onClick={() => handleRequestDeleteBank(bank)}
                       className="p-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-rose-600 border border-slate-200 transition-colors"
                       title="Xóa bộ đề"
                     >
@@ -1855,32 +2026,32 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                 </select>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Số câu hỏi đề thi *</label>
+                  <label className="block text-slate-700 font-bold mb-1">Số câu hỏi *</label>
                   <input
                     type="number"
                     min="1"
                     required
                     value={sessionFormData.totalQuestions}
                     onChange={(e) => setSessionFormData({ ...sessionFormData, totalQuestions: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono font-bold"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono font-bold text-center"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Thời gian (Phút)</label>
+                  <label className="block text-slate-700 font-bold mb-1">Phút thi</label>
                   <input
                     type="number"
                     min="1"
                     value={sessionFormData.durationMinutes}
                     onChange={(e) => setSessionFormData({ ...sessionFormData, durationMinutes: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono text-center"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-700 font-bold mb-1">Điểm Đạt (/10)</label>
+                  <label className="block text-slate-700 font-bold mb-1">Điểm đạt</label>
                   <input
                     type="number"
                     step="0.5"
@@ -1888,7 +2059,19 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     max="10"
                     value={sessionFormData.passScore}
                     onChange={(e) => setSessionFormData({ ...sessionFormData, passScore: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono text-center"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1" title="Số lượt thi tối đa cho mỗi tài khoản">Số lượt thi</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={sessionFormData.maxAttempts}
+                    onChange={(e) => setSessionFormData({ ...sessionFormData, maxAttempts: Number(e.target.value) })}
+                    placeholder="0: Không hạn chế"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono text-center"
                   />
                 </div>
               </div>
@@ -2040,10 +2223,9 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             <div className="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
               <button
                 onClick={() => {
-                  const bId = selectedBankForDetail.id;
-                  const bTitle = selectedBankForDetail.title;
+                  const bankObj = selectedBankForDetail;
                   setSelectedBankForDetail(null);
-                  handleDeleteBank(bId, bTitle);
+                  handleRequestDeleteBank(bankObj);
                 }}
                 className="px-3.5 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold border border-rose-200 text-xs flex items-center space-x-1"
               >
@@ -2178,7 +2360,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                 <h3 className="text-sm font-bold text-white mt-1">{activeSimulatorSession.title}</h3>
               </div>
 
-              {!testResultSummary && (
+              {!testResultSummary && !isAttemptsExhausted(activeSimulatorSession) && (
                 <div className="flex items-center space-x-2 bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-xl font-mono text-sm font-bold">
                   <Clock className="w-4 h-4 animate-spin" />
                   <span>
@@ -2190,7 +2372,51 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             </div>
 
             {/* Test Content OR Summary */}
-            {testResultSummary ? (
+            {isAttemptsExhausted(activeSimulatorSession) ? (
+              <div className="p-12 text-center space-y-6 overflow-y-auto flex-1 flex flex-col items-center justify-center">
+                <div className="w-20 h-20 rounded-full bg-slate-800 border-2 border-amber-500 text-amber-400 flex items-center justify-center shadow-lg animate-bounce">
+                  <Smartphone className="w-10 h-10" />
+                </div>
+                
+                <div className="max-w-md mx-auto space-y-3">
+                  <h2 className="text-xl font-black text-amber-400 uppercase tracking-wide">ĐỒNG CHÍ ĐÃ HOÀN THÀNH ĐỢT THI</h2>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Hệ thống ghi nhận quân nhân <strong>{currentUser?.name || currentUser?.fullName || 'quân nhân'}</strong> đã thực hiện hết số lượt thi cho phép của đợt kiểm tra này.
+                  </p>
+                  
+                  <div className="bg-slate-800 border border-slate-700 rounded-2xl p-4 space-y-2 mt-4 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-400">Số lượt thi tối đa:</span>
+                      <span className="font-bold text-amber-400 font-mono">{activeSimulatorSession.maxAttempts} lượt</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-400">Số lượt thi đã hoàn thành:</span>
+                      <span className="font-bold text-slate-200 font-mono">{getUserAttemptsForSession(activeSimulatorSession)} / {activeSimulatorSession.maxAttempts} lượt</span>
+                    </div>
+                    <div className="flex justify-between items-center border-t border-slate-700/60 pt-2 mt-1">
+                      <span className="text-slate-400">Kết quả cao nhất:</span>
+                      <span className="font-bold text-emerald-400 font-mono">
+                        {(() => {
+                          const uId = currentUser?.id;
+                          const uDoc = users.find(u => u.id === uId);
+                          if (uDoc && (uDoc as any).lastExamScore !== undefined) {
+                            return `${(uDoc as any).lastExamScore}/${(uDoc as any).lastExamTotal || 10}đ (${(uDoc as any).lastExamPassed !== false ? 'Đạt' : 'Chưa đạt'})`;
+                          }
+                          return 'Đã ghi nhận';
+                        })()}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setActiveSimulatorSession(null)}
+                  className="px-8 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white shadow-md transition-all mt-4"
+                >
+                  Đóng Trình Giả Lập App
+                </button>
+              </div>
+            ) : testResultSummary ? (
               <div className="p-8 text-center space-y-6 overflow-y-auto flex-1">
                 <div className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center border-2 ${
                   testResultSummary.passed ? 'bg-emerald-950 border-emerald-500 text-emerald-400' : 'bg-rose-950 border-rose-500 text-rose-400'
@@ -2263,7 +2489,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             )}
 
             {/* Footer Submit Button */}
-            {!testResultSummary && (
+            {!testResultSummary && !isAttemptsExhausted(activeSimulatorSession) && (
               <div className="p-4 bg-slate-800 border-t border-slate-700 flex items-center justify-between shrink-0">
                 <span className="text-slate-400 text-xs">
                   Đã trả lời: <strong className="text-amber-400 font-mono">{Object.keys(userAnswers).length} / {simulatorQuestions.length}</strong> câu
@@ -2373,6 +2599,41 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
               <button
                 type="button"
                 onClick={() => confirmDeleteSession(sessionToDelete)}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition-colors flex items-center space-x-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Xóa Vĩnh Viễn</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xác Nhận Xóa Bộ Đề Thi */}
+      {bankToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
+            <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
+              <Trash2 className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900">Xác Nhận Xóa Bộ Đề Thi</h3>
+              <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                Đồng chí có chắc chắn muốn xóa hẳn bộ đề <strong className="text-slate-800">"{bankToDelete.title}"</strong>? 
+                Hành động này sẽ xóa vĩnh viễn bộ đề này cùng toàn bộ câu hỏi trắc nghiệm liên quan khỏi hệ thống và Firebase Cloud.
+              </p>
+            </div>
+            <div className="pt-2 flex items-center justify-center space-x-3">
+              <button
+                type="button"
+                onClick={() => setBankToDelete(null)}
+                className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors"
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmDeleteBank(bankToDelete)}
                 className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition-colors flex items-center space-x-1.5"
               >
                 <Trash2 className="w-4 h-4" />

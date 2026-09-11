@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Course, 
   Lesson, 
@@ -7,7 +7,8 @@ import {
   UserProgress, 
   SystemNotification, 
   RealtimeEvent,
-  AppBanner
+  AppBanner,
+  UserFeedback
 } from './types';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
@@ -55,12 +56,26 @@ export function App() {
   const [progressList, setProgressList] = useState<UserProgress[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [banners, setBanners] = useState<AppBanner[]>([]);
+  const [feedbacks, setFeedbacks] = useState<UserFeedback[]>([]);
 
   // Navigation & Modal states
   const [selectedLessonForEditing, setSelectedLessonForEditing] = useState<Lesson | null>(null);
   const [previewLesson, setPreviewLesson] = useState<Lesson | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Unresolved feedbacks count (pending, received, in-progress, or without admin response)
+  const unresolvedFeedbacksCount = useMemo(() => {
+    return feedbacks.filter((f) => {
+      const st = (f.status || '').toUpperCase();
+      return (
+        st === 'PENDING' ||
+        st === 'RECEIVED' ||
+        st === 'IN_PROGRESS' ||
+        (!f.adminResponse && st !== 'RESOLVED' && st !== 'REJECTED')
+      );
+    }).length;
+  }, [feedbacks]);
 
   // Load all initial data from backend API
   const fetchAllData = async () => {
@@ -77,6 +92,7 @@ export function App() {
         progressRes,
         notifsRes,
         bannersRes,
+        feedbacksRes,
       ] = await Promise.all([
         api.getCourses(false),
         api.getCourses(true),
@@ -87,6 +103,7 @@ export function App() {
         api.getProgress(),
         api.getNotifications(),
         api.getBanners().catch(() => []),
+        api.getFeedbacks().catch(() => []),
       ]);
 
       setCourses(coursesRes);
@@ -98,6 +115,7 @@ export function App() {
       setProgressList(progressRes);
       setNotifications(notifsRes);
       setBanners(bannersRes);
+      setFeedbacks(feedbacksRes || []);
     } catch (err) {
       console.error('Error fetching initial data:', err);
     } finally {
@@ -119,8 +137,14 @@ export function App() {
         fetchAllData();
       });
 
+      // Realtime listener for feedbacks to keep unresolved badge immediately synchronized
+      const unsubFeedbacks = api.listenFeedbacks((fbs) => {
+        setFeedbacks(fbs);
+      });
+
       return () => {
         unsubscribe();
+        unsubFeedbacks();
       };
     }
   }, [adminUser]);
@@ -276,7 +300,7 @@ export function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans selection:bg-amber-400 selection:text-slate-950">
+    <div className="h-screen w-full bg-slate-100 text-slate-900 flex flex-col font-sans selection:bg-amber-400 selection:text-slate-950 overflow-hidden">
       {/* Realtime Notification Toast */}
       {realtimeNotification && (
         <div className="fixed top-5 right-5 z-50 bg-amber-500 text-slate-950 px-4 py-2.5 rounded-2xl font-bold text-xs shadow-xl flex items-center space-x-2 animate-in slide-in-from-top-4 border border-amber-300">
@@ -296,6 +320,10 @@ export function App() {
         onRefresh={fetchAllData}
         adminUser={adminUser}
         onLogout={handleLogout}
+        onSelectTab={(tab) => {
+          setSelectedLessonForEditing(null);
+          setCurrentView(tab);
+        }}
         onOpenTrash={() => {
           setSelectedLessonForEditing(null);
           setCurrentView('courses');
@@ -303,7 +331,7 @@ export function App() {
       />
 
       {/* App Body with Sidebar and Main Content */}
-      <div className="flex-1 flex max-w-[1920px] w-full mx-auto">
+      <div className="flex-1 flex max-w-[1920px] w-full mx-auto overflow-hidden min-h-0">
         {/* Left Navigation Sidebar */}
         <Sidebar
           activeTab={selectedLessonForEditing ? 'courses' : currentView}
@@ -312,11 +340,18 @@ export function App() {
             setCurrentView(tab);
           }}
           trashCount={deletedCourses.length + deletedLessons.length}
+          unresolvedFeedbacksCount={unresolvedFeedbacksCount}
+          stats={{
+            totalCourses: courses.length,
+            totalLessons: lessons.length,
+            unreadNotifs: notifications.length,
+            pendingFeedbacks: unresolvedFeedbacksCount,
+          }}
           onLogout={handleLogout}
         />
 
         {/* Dynamic Main Content Workspace */}
-        <main className="flex-1 p-4 lg:p-7 overflow-y-auto max-h-[calc(100vh-73px)] bg-slate-50/70">
+        <main className="flex-1 h-full min-h-0 p-4 lg:p-7 overflow-y-auto bg-slate-50/70 overscroll-contain">
           {isLoading ? (
             <div className="py-24 text-center text-slate-500 text-xs">
               <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />

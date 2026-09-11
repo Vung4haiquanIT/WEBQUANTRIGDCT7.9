@@ -141,7 +141,7 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
         responseText.trim(),
         respondedByText.trim()
       );
-      alert('Đã cập nhật phản hồi và trạng thái xử lý thành công!');
+      alert('Đã cập nhật phản hồi và tự động gửi thông báo tới App của quân nhân thành công!');
       setActiveFeedbackForResponse(null);
       loadFeedbacks();
     } catch (err: any) {

@@ -216,9 +216,12 @@ service cloud.firestore {
       allow delete: if isSuperAdmin() && isValidId(unitId);
     }
 
-    // Users Collection
+    // Users Collection & subcollections
     match /users/{userId} {
       allow read, write: if true;
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
     }
 
     // User Progress Collection
@@ -278,10 +281,12 @@ service cloud.firestore {
 
     // Notifications Collection
     match /notifications/{notificationId} {
-      allow get, list: if true;
-      allow create: if isUnitAdmin() && isValidId(notificationId) && isValidNotification(incoming()) && incoming().id == notificationId;
-      allow update: if isUnitAdmin() && isValidId(notificationId) && isValidNotification(incoming()) && incoming().id == existing().id;
-      allow delete: if isUnitAdmin() && isValidId(notificationId);
+      allow read, write: if true;
+    }
+
+    // User Personal Notifications Collection
+    match /user_notifications/{notificationId} {
+      allow read, write: if true;
     }
 
     // Storage File Metadata Collection

@@ -24,10 +24,12 @@ export interface SidebarProps {
   setActiveTab?: (tab: NavTab) => void;
   onSelectTab?: (tab: string) => void;
   trashCount?: number;
+  unresolvedFeedbacksCount?: number;
   stats?: {
     totalCourses: number;
     totalLessons: number;
     unreadNotifs?: number;
+    pendingFeedbacks?: number;
   };
   onLogout?: () => void;
 }
@@ -37,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab, 
   onSelectTab,
   trashCount = 0,
+  unresolvedFeedbacksCount,
   stats,
   onLogout
 }) => {
@@ -47,6 +50,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setActiveTab(tabId);
     }
   };
+
+  const pendingFeedbacks = unresolvedFeedbacksCount ?? stats?.pendingFeedbacks ?? 0;
 
   const menuItems = [
     {
@@ -71,7 +76,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'feedbacks' as NavTab,
       label: 'PHẢN ÁNH & GÓP Ý',
       icon: MessageSquareText,
-      badge: 'PHẢN HỒI',
+      badge: pendingFeedbacks > 0 ? `${pendingFeedbacks}` : null,
     },
     {
       id: 'users' as NavTab,
@@ -101,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'notifications' as NavTab,
       label: 'THÔNG BÁO',
       icon: Bell,
-      badge: stats?.unreadNotifs ? `${stats.unreadNotifs}` : undefined,
+      badge: null,
     },
     {
       id: 'settings' as NavTab,
@@ -118,7 +123,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="w-72 bg-[#0B1E3B] text-white flex flex-col shrink-0 border-r border-slate-700/80 relative select-none shadow-lg z-30">
+    <aside className="w-72 h-full bg-[#0B1E3B] text-white flex flex-col shrink-0 border-r border-slate-700/80 relative select-none shadow-lg z-30 overflow-hidden min-h-0">
       {/* Background Dong Son Watermark */}
       <div className="absolute top-0 right-0 -mr-16 -mt-16 pointer-events-none opacity-5">
         <DongSonDrum className="w-80 h-80" color="#F59E0B" opacity={1} />
@@ -128,7 +133,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Military Command Header */}
-      <div className="p-5 border-b border-slate-700/80 relative z-10 bg-slate-900/40">
+      <div className="p-5 border-b border-slate-700/80 relative z-10 bg-slate-900/40 shrink-0">
         <div className="flex items-center space-x-3">
           <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 p-0.5 shadow flex-shrink-0">
             <div className="w-full h-full bg-[#0B1E3B] rounded-[9px] flex items-center justify-center relative overflow-hidden">
@@ -160,10 +165,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      <DongSonBorder color="#F59E0B" className="h-1.5 opacity-30" />
+      <DongSonBorder color="#F59E0B" className="h-1.5 opacity-30 shrink-0" />
 
       {/* Main Navigation Menu */}
-      <nav className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto relative z-10">
+      <nav className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto relative z-10 min-h-0">
         <div className="px-3 pb-2 text-[10px] font-bold text-slate-400 tracking-wider uppercase">
           Danh mục quản trị
         </div>
@@ -197,7 +202,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                     isActive
-                      ? 'bg-slate-950 text-amber-300'
+                      ? item.id === 'feedbacks'
+                        ? 'bg-rose-600 text-white font-extrabold shadow'
+                        : 'bg-slate-950 text-amber-300'
+                      : item.id === 'feedbacks'
+                      ? 'bg-rose-500 text-white font-extrabold shadow-sm ring-1 ring-rose-400/50'
                       : 'bg-slate-800 text-amber-300 border border-slate-700'
                   }`}
                 >
@@ -209,10 +218,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })}
       </nav>
 
-      <DongSonBorder color="#F59E0B" className="h-1.5 opacity-30" />
+      <DongSonBorder color="#F59E0B" className="h-1.5 opacity-30 shrink-0" />
 
       {/* Footer / App Info */}
-      <div className="p-4 bg-slate-950/50 border-t border-slate-800 relative z-10 text-xs space-y-3">
+      <div className="p-4 bg-slate-950/50 border-t border-slate-800 relative z-10 text-xs space-y-3 shrink-0">
         <div>
           <div className="flex items-center space-x-2 text-amber-300 mb-1">
             <Layers className="w-3.5 h-3.5 text-amber-400" />
