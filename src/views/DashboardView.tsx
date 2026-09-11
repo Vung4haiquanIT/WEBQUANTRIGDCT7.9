@@ -62,7 +62,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const completedCount = safeProgress.filter(p => p.completed).length;
   const avgCompletionRate = safeProgress.length > 0 
-    ? Math.round(safeProgress.reduce((acc, curr) => acc + (curr.percent || 0), 0) / safeProgress.length)
+    ? Math.round(safeProgress.reduce((acc, curr) => acc + (curr.overallProgress || 0), 0) / safeProgress.length)
     : (stats?.averageCompletionRate || 89);
 
   const statusPieData = [

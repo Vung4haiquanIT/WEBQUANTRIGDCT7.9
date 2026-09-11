@@ -2978,6 +2978,65 @@ app.post('/api/storage/upload', upload.single('file'), (req: Request, res: Respo
 });
 
 // -------------------------------------------------------------
+// SYSTEM OFFICIAL LOGO VÙNG 4 HẢI QUÂN MANAGEMENT API
+// -------------------------------------------------------------
+app.get('/api/system/logo', (_req: Request, res: Response) => {
+  const logoPath = path.join(process.cwd(), 'public', 'logov4.png');
+  const exists = fs.existsSync(logoPath);
+  let size = 0;
+  let mtime = 0;
+  if (exists) {
+    const stats = fs.statSync(logoPath);
+    size = stats.size;
+    mtime = stats.mtimeMs;
+  }
+  res.json({
+    exists,
+    url: exists ? `/logov4.png?t=${mtime}` : null,
+    size,
+    updatedAt: mtime ? new Date(mtime).toISOString() : null
+  });
+});
+
+app.post('/api/system/logo', upload.single('file'), (req: Request, res: Response) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'Vui lòng chọn file hình ảnh logo gốc (logov4.png)' });
+  }
+
+  try {
+    const targetPublicPath = path.join(process.cwd(), 'public', 'logov4.png');
+    fs.copyFileSync(req.file.path, targetPublicPath);
+
+    // Also copy to dist if dist exists
+    const distPath = path.join(process.cwd(), 'dist');
+    if (fs.existsSync(distPath)) {
+      fs.copyFileSync(req.file.path, path.join(distPath, 'logov4.png'));
+    }
+
+    const stats = fs.statSync(targetPublicPath);
+
+    // Broadcast update so all open tabs reload the authentic logo immediately
+    broadcastRealtime({
+      type: 'MODULE_CONFIG_CHANGED',
+      entityId: 'system-logo',
+      action: 'UPDATE',
+      timestamp: new Date().toISOString(),
+      data: { url: `/logov4.png?t=${stats.mtimeMs}` }
+    });
+
+    res.json({
+      success: true,
+      url: `/logov4.png?t=${stats.mtimeMs}`,
+      size: stats.size,
+      message: 'Đã lưu logo gốc Vùng 4 Hải quân thành công.'
+    });
+  } catch (err: any) {
+    console.error('Error saving system logo:', err);
+    res.status(500).json({ error: 'Không thể lưu file logo: ' + (err.message || err) });
+  }
+});
+
+// -------------------------------------------------------------
 // CLOUDINARY MEDIA STORAGE PROXY API (Bảo mật 100% API Secret ở Backend)
 // -------------------------------------------------------------
 

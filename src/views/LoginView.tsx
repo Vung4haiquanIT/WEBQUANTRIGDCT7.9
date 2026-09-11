@@ -11,6 +11,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { DongSonDrum, DongSonBorder } from '../components/DongSonMotif';
+import { Vung4Logo } from '../components/Vung4Logo';
 
 interface LoginViewProps {
   onLoginSuccess: (adminUser: { email: string; name: string; role: string }) => void;
@@ -84,12 +85,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       {/* Top Banner Header */}
       <header className="relative z-10 pt-6 px-6 sm:px-12 flex items-center justify-between">
         <div className="flex items-center space-x-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 p-0.5 shadow-lg shadow-amber-500/20 flex-shrink-0">
-            <div className="w-full h-full bg-[#0B1E3B] rounded-[14px] flex items-center justify-center relative overflow-hidden">
-              <DongSonDrum className="absolute inset-0 w-full h-full scale-150 opacity-25" color="#FBBF24" />
-              <Anchor className="w-6 h-6 text-amber-300 relative z-10" />
-            </div>
-          </div>
+          <Vung4Logo className="h-12 w-auto shrink-0" />
           <div>
             <div className="text-[11px] font-extrabold tracking-widest text-amber-400 uppercase">
               QUÂN CHỦNG HẢI QUÂN • VÙNG 4 HẢI QUÂN
@@ -116,8 +112,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
           {/* Form Header */}
           <div className="text-center mb-7 pt-2">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-b from-amber-400/20 to-amber-600/10 border border-amber-400/40 mb-3.5 shadow-inner">
-              <Shield className="w-8 h-8 text-amber-400 drop-shadow" />
+            <div className="inline-flex items-center justify-center mb-3">
+              <Vung4Logo className="h-20 w-auto drop-shadow-xl" />
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-white uppercase tracking-tight">
               ĐĂNG NHẬP QUẢN TRỊ

@@ -142,9 +142,17 @@ export function App() {
         setFeedbacks(fbs);
       });
 
+      // Realtime listener for learning progress from mobile app and web
+      const unsubProgress = api.listenProgress((progs) => {
+        if (progs && progs.length > 0) {
+          setProgressList(progs);
+        }
+      });
+
       return () => {
         unsubscribe();
         unsubFeedbacks();
+        unsubProgress();
       };
     }
   }, [adminUser]);

@@ -70,14 +70,8 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-              Biên chế Vùng 4 Hải Quân
-            </span>
-            <span className="text-xs text-slate-500 font-mono">Lữ đoàn • Tàu chiến • Đảo Trường Sa</span>
-          </div>
-          <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight mt-1">
-            QUẢN LÝ ĐƠN VỊ & LỰC LƯỢNG HẢI QUÂN
+          <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight">
+            QUẢN LÝ ĐƠN VỊ & LỰC LƯỢNG
           </h2>
         </div>
 

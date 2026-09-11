@@ -10,6 +10,7 @@ import {
   Shield
 } from 'lucide-react';
 import { DongSonDrum } from './DongSonMotif';
+import { Vung4Logo } from './Vung4Logo';
 import { SystemNotification } from '../types';
 
 interface HeaderProps {
@@ -71,8 +72,9 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Left: Title & Live indicator */}
-      <div className="flex items-center space-x-4">
+      {/* Left: Title with Vùng 4 Emblem & Live indicator */}
+      <div className="flex items-center space-x-3.5">
+        <Vung4Logo className="h-12 w-auto shrink-0" />
         <div>
           <div className="flex items-center space-x-2">
             <span className="text-[10px] font-bold tracking-widest text-amber-300 uppercase bg-amber-500/20 border border-amber-400/30 px-2 py-0.5 rounded">

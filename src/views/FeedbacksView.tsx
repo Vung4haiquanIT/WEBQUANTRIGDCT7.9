@@ -22,6 +22,7 @@ import {
 import * as XLSX from 'xlsx';
 import { UserFeedback, FeedbackType, FeedbackStatus, Unit } from '../types';
 import { api } from '../services/api';
+import { matchSearch } from '../utils/vietnamese';
 
 interface FeedbacksViewProps {
   currentUser?: any;
@@ -100,12 +101,11 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
     if (selectedUnit !== 'ALL' && fb.unitName !== selectedUnit) return false;
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchTitle = fb.title.toLowerCase().includes(q);
-      const matchContent = fb.content.toLowerCase().includes(q);
-      const matchName = fb.userName.toLowerCase().includes(q);
-      const matchUnit = fb.unitName.toLowerCase().includes(q);
-      const matchExam = (fb.relatedExamTitle || '').toLowerCase().includes(q);
+      const matchTitle = matchSearch(fb.title, searchQuery);
+      const matchContent = matchSearch(fb.content, searchQuery);
+      const matchName = matchSearch(fb.userName, searchQuery);
+      const matchUnit = matchSearch(fb.unitName, searchQuery);
+      const matchExam = matchSearch(fb.relatedExamTitle, searchQuery);
       if (!matchTitle && !matchContent && !matchName && !matchUnit && !matchExam) {
         return false;
       }

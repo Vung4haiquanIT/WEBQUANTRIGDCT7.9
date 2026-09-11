@@ -8,12 +8,10 @@ import {
   TrendingUp, 
   Bell, 
   Settings,
-  Shield,
   ShieldCheck,
   Layers,
   Image as ImageIcon,
-  MessageSquareText,
-  LogOut
+  MessageSquareText
 } from 'lucide-react';
 import { DongSonDrum, DongSonBorder } from './DongSonMotif';
 
@@ -132,41 +130,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <DongSonDrum className="w-72 h-72" color="#F59E0B" opacity={1} />
       </div>
 
-      {/* Military Command Header */}
-      <div className="p-5 border-b border-slate-700/80 relative z-10 bg-slate-900/40 shrink-0">
-        <div className="flex items-center space-x-3">
-          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 p-0.5 shadow flex-shrink-0">
-            <div className="w-full h-full bg-[#0B1E3B] rounded-[9px] flex items-center justify-center relative overflow-hidden">
-              <DongSonDrum className="absolute inset-0 w-full h-full scale-150 opacity-20" color="#FBBF24" />
-              <Shield className="w-5 h-5 text-amber-300 relative z-10 drop-shadow" />
-            </div>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="text-[10px] font-bold tracking-wider text-amber-300 uppercase">
-              BỘ TƯ LỆNH VÙNG 4
-            </div>
-            <div className="text-sm font-extrabold text-white tracking-tight uppercase leading-tight truncate">
-              HẢI QUÂN NHÂN DÂN
-            </div>
-            <div className="text-[11px] text-slate-300 font-medium truncate mt-0.5">
-              Ban Tuyên huấn Vùng 4
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3.5 pt-3 border-t border-slate-700/60 flex items-center justify-between text-[11px] text-slate-300 font-medium">
-          <span className="flex items-center space-x-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
-            <span>Hệ Thống Trực Tuyến</span>
-          </span>
-          <span className="bg-slate-800 text-amber-300 px-2 py-0.5 rounded text-[10px] font-mono border border-slate-700">
-            Phiên bản 2026
-          </span>
-        </div>
-      </div>
-
-      <DongSonBorder color="#F59E0B" className="h-1.5 opacity-30 shrink-0" />
-
       {/* Main Navigation Menu */}
       <nav className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto relative z-10 min-h-0">
         <div className="px-3 pb-2 text-[10px] font-bold text-slate-400 tracking-wider uppercase">
@@ -219,30 +182,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       <DongSonBorder color="#F59E0B" className="h-1.5 opacity-30 shrink-0" />
-
-      {/* Footer / App Info */}
-      <div className="p-4 bg-slate-950/50 border-t border-slate-800 relative z-10 text-xs space-y-3 shrink-0">
-        <div>
-          <div className="flex items-center space-x-2 text-amber-300 mb-1">
-            <Layers className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-bold text-[11px]">GIÁO DỤC CHÍNH TRỊ HQV4</span>
-          </div>
-          <p className="text-[10px] text-slate-400 leading-relaxed">
-            Đồng bộ trực tuyến sẵn sàng kết nối ứng dụng học tập chiến sĩ.
-          </p>
-        </div>
-
-        {onLogout && (
-          <button
-            id="sidebar-logout-btn"
-            onClick={onLogout}
-            className="w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-xl bg-slate-900/90 hover:bg-rose-950/50 text-slate-300 hover:text-rose-300 border border-slate-700/80 hover:border-rose-700/60 text-xs font-semibold transition-all"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Đăng xuất quản trị</span>
-          </button>
-        )}
-      </div>
     </aside>
   );
 };

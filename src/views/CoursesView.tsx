@@ -35,6 +35,7 @@ import {
   getFixedCourseCategory, 
   FIXED_COURSES_DEFINITIONS 
 } from '../utils/fixedCourses';
+import { matchSearch } from '../utils/vietnamese';
 
 interface CoursesViewProps {
   courses: Course[];
@@ -248,9 +249,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   // Filtered courses
   const filteredCourses = courses.filter((c) => {
-    const matchSearch =
-      c.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      (c.description && c.description.toLowerCase().includes(searchFilter.toLowerCase()));
+    const matchSearchQuery = !searchFilter.trim() ||
+      matchSearch(c.title, searchFilter) ||
+      matchSearch(c.description, searchFilter);
     const matchYear = yearFilter === 'ALL' || c.year === yearFilter;
     const matchStatus = statusFilter === 'ALL' || c.status === statusFilter;
     
@@ -265,7 +266,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       matchCategory = cat?.categoryKey === categoryFilter || c.categoryKey === categoryFilter;
     }
 
-    return matchSearch && matchYear && matchStatus && matchCategory;
+    return matchSearchQuery && matchYear && matchStatus && matchCategory;
   });
 
   return (

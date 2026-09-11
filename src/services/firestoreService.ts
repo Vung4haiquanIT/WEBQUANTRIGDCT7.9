@@ -1612,10 +1612,67 @@ export const firestoreService = {
     } else if (lessonId) {
       q = query(colRef, where('lessonId', '==', lessonId));
     } else {
-      q = query(colRef, limit(100));
+      q = query(colRef, limit(200));
     }
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as UserProgress));
+    return snap.docs.map(d => {
+      const data = d.data() as any;
+      const rawTime = data.lastAccessedAt || data.updatedAt || data.completedAt || data.thoiGianHoanThanh || data.createdAt;
+      let isoTime = new Date().toISOString();
+      if (typeof rawTime === 'number') {
+        isoTime = new Date(rawTime).toISOString();
+      } else if (typeof rawTime === 'string') {
+        const parsed = new Date(rawTime);
+        if (!isNaN(parsed.getTime())) {
+          isoTime = parsed.toISOString();
+        }
+      } else if (rawTime && typeof rawTime.toDate === 'function') {
+        isoTime = rawTime.toDate().toISOString();
+      }
+
+      // Calculate component and overall progress cleanly
+      const isCompl = Boolean(data.completed || data.hoanThanh || data.isCompleted || data.daDat);
+      const sProg = typeof data.slideProgress === 'number' 
+        ? data.slideProgress 
+        : (data.daXemSlide || data.viewedSlides ? 100 : 0);
+      const cProg = typeof data.contentProgress === 'number' 
+        ? data.contentProgress 
+        : (data.daDocNoiDung || data.readContent ? 100 : 0);
+      const vProg = typeof data.videoProgress === 'number' ? data.videoProgress : 0;
+      const aProg = typeof data.audioProgress === 'number' ? data.audioProgress : 0;
+
+      let overall = typeof data.overallProgress === 'number' 
+        ? data.overallProgress 
+        : (typeof data.scorePercentage === 'number' ? data.scorePercentage : (typeof data.phanTramDiem === 'number' ? data.phanTramDiem : 0));
+      
+      if (!overall) {
+        if (isCompl) {
+          overall = 100;
+        } else {
+          overall = Math.max(sProg, cProg, vProg, aProg);
+        }
+      }
+
+      return {
+        id: d.id,
+        userId: data.userId || data.user_id || data.nguoiDungId || '',
+        userName: data.userName || data.name || 'Học viên',
+        unitId: data.unitId || data.unit_id || '',
+        unitName: data.unitName || data.donVi || data.unit || 'Chưa cập nhật đơn vị',
+        lessonId: data.lessonId || data.lesson_id || data.baiHocId || '',
+        lessonTitle: data.lessonTitle || data.tenBaiHoc || 'Bài học',
+        courseId: data.courseId || data.course_id || '',
+        slideProgress: sProg,
+        videoProgress: vProg,
+        audioProgress: aProg,
+        contentProgress: cProg,
+        overallProgress: overall,
+        completed: isCompl || overall >= 85,
+        lastAccessedAt: isoTime,
+        completedAt: data.completedAt || (isCompl ? isoTime : undefined),
+        version: data.version || 1
+      } as UserProgress;
+    });
   },
 
   submitProgress: async (data: Partial<UserProgress>): Promise<UserProgress> => {
@@ -1652,6 +1709,73 @@ export const firestoreService = {
 
     await setDoc(docRef, progressRecord);
     return progressRecord;
+  },
+
+  listenProgress: (callback: (list: UserProgress[]) => void) => {
+    const colRef = collection(db, 'progress');
+    const q = query(colRef, limit(200));
+    return onSnapshot(q, (snap) => {
+      const list = snap.docs.map(d => {
+        const data = d.data() as any;
+        const rawTime = data.lastAccessedAt || data.updatedAt || data.completedAt || data.thoiGianHoanThanh || data.createdAt;
+        let isoTime = new Date().toISOString();
+        if (typeof rawTime === 'number') {
+          isoTime = new Date(rawTime).toISOString();
+        } else if (typeof rawTime === 'string') {
+          const parsed = new Date(rawTime);
+          if (!isNaN(parsed.getTime())) {
+            isoTime = parsed.toISOString();
+          }
+        } else if (rawTime && typeof rawTime.toDate === 'function') {
+          isoTime = rawTime.toDate().toISOString();
+        }
+
+        const isCompl = Boolean(data.completed || data.hoanThanh || data.isCompleted || data.daDat);
+        const sProg = typeof data.slideProgress === 'number' 
+          ? data.slideProgress 
+          : (data.daXemSlide || data.viewedSlides ? 100 : 0);
+        const cProg = typeof data.contentProgress === 'number' 
+          ? data.contentProgress 
+          : (data.daDocNoiDung || data.readContent ? 100 : 0);
+        const vProg = typeof data.videoProgress === 'number' ? data.videoProgress : 0;
+        const aProg = typeof data.audioProgress === 'number' ? data.audioProgress : 0;
+
+        let overall = typeof data.overallProgress === 'number' 
+          ? data.overallProgress 
+          : (typeof data.scorePercentage === 'number' ? data.scorePercentage : (typeof data.phanTramDiem === 'number' ? data.phanTramDiem : 0));
+        
+        if (!overall) {
+          if (isCompl) {
+            overall = 100;
+          } else {
+            overall = Math.max(sProg, cProg, vProg, aProg);
+          }
+        }
+
+        return {
+          id: d.id,
+          userId: data.userId || data.user_id || data.nguoiDungId || '',
+          userName: data.userName || data.name || 'Học viên',
+          unitId: data.unitId || data.unit_id || '',
+          unitName: data.unitName || data.donVi || data.unit || 'Chưa cập nhật đơn vị',
+          lessonId: data.lessonId || data.lesson_id || data.baiHocId || '',
+          lessonTitle: data.lessonTitle || data.tenBaiHoc || 'Bài học',
+          courseId: data.courseId || data.course_id || '',
+          slideProgress: sProg,
+          videoProgress: vProg,
+          audioProgress: aProg,
+          contentProgress: cProg,
+          overallProgress: overall,
+          completed: isCompl || overall >= 85,
+          lastAccessedAt: isoTime,
+          completedAt: data.completedAt || (isCompl ? isoTime : undefined),
+          version: data.version || 1
+        } as UserProgress;
+      });
+      callback(list);
+    }, (err) => {
+      console.warn('[listenProgress error]:', err);
+    });
   },
 
   // -------------------------------------------------------------

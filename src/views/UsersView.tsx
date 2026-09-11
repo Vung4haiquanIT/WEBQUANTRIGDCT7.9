@@ -23,6 +23,7 @@ import {
   Users
 } from 'lucide-react';
 import { User, UserRole, Unit, UserProgress, ExamSubmission, UserFeedback } from '../types';
+import { matchSearch } from '../utils/vietnamese';
 import { api } from '../services/api';
 
 interface UsersViewProps {
@@ -112,17 +113,17 @@ export const UsersView: React.FC<UsersViewProps> = ({
     const userRankPos = u.rankAndPosition || `${userRank} - ${userPos}`;
     const userUnit = u.unit || u.unitName || '';
 
-    const matchSearch =
-      displayName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      userRankPos.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      userUnit.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchSearchQuery = !searchTerm.trim() ||
+      matchSearch(displayName, searchTerm) ||
+      matchSearch(u.email, searchTerm) ||
+      matchSearch(userRankPos, searchTerm) ||
+      matchSearch(userUnit, searchTerm);
 
     const matchRole = roleFilter === 'ALL' || userRole === roleFilter;
     const matchUnit = unitFilter === 'ALL' || u.unitId === unitFilter || userUnit.toLowerCase().includes(unitFilter.toLowerCase());
     const matchStatus = statusFilter === 'ALL' || (statusFilter === 'ACTIVE' ? u.status !== 'INACTIVE' : u.status === 'INACTIVE');
 
-    return matchSearch && matchRole && matchUnit && matchStatus;
+    return matchSearchQuery && matchRole && matchUnit && matchStatus;
   });
 
   // Role & Status Counts
@@ -837,7 +838,14 @@ export const UsersView: React.FC<UsersViewProps> = ({
                                 </span>
                               </td>
                               <td className="p-3 text-right text-slate-500 text-[11px]">
-                                {prog.lastAccessedAt ? new Date(prog.lastAccessedAt).toLocaleString('vi-VN') : '—'}
+                                {(() => {
+                                  if (!prog.lastAccessedAt) return '—';
+                                  const d = new Date(prog.lastAccessedAt);
+                                  if (!isNaN(d.getTime())) return d.toLocaleString('vi-VN');
+                                  const num = Number(prog.lastAccessedAt);
+                                  if (!isNaN(num) && num > 0) return new Date(num).toLocaleString('vi-VN');
+                                  return '—';
+                                })()}
                               </td>
                             </tr>
                           ))}

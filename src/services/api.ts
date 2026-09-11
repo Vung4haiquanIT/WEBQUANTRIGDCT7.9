@@ -993,6 +993,10 @@ export const api = {
     return await firestoreService.getProgress(unitId, lessonId);
   },
 
+  listenProgress: (callback: (list: UserProgress[]) => void) => {
+    return firestoreService.listenProgress(callback);
+  },
+
   submitProgress: async (data: Partial<UserProgress>): Promise<UserProgress> => {
     return await firestoreService.submitProgress(data);
   },
