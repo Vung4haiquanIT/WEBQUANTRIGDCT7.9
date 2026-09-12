@@ -23,9 +23,7 @@ import {
   ArrowUpDown,
   Upload,
   Image as ImageIcon,
-  Lock,
-  Smartphone,
-  ShieldCheck
+  Lock
 } from 'lucide-react';
 import { Course, Lesson, PublishStatus } from '../types';
 import { DongSonDrum } from '../components/DongSonMotif';
@@ -271,62 +269,33 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Header controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="text-xs font-bold text-blue-700 uppercase tracking-wider bg-blue-50 px-2 py-0.5 rounded border border-blue-200 flex items-center gap-1">
-              <Smartphone className="w-3.5 h-3.5" />
-              Đồng bộ Tiện ích App
-            </span>
-            <span className="text-xs text-slate-500">Chuyên đề cố định (GDCT, GDPL, Lịch sử, Biển đảo) & Chuyên đề mới tạo</span>
-          </div>
-          <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight mt-1">
+      {/* Unified Header & Category Filter Card */}
+      <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">
             QUẢN LÝ CHUYÊN ĐỀ & BÀI HỌC GIÁO DỤC CHÍNH TRỊ
           </h2>
-        </div>
 
-        <div className="flex items-center space-x-3">
-          <button
-            id="create-new-course-header-btn"
-            onClick={handleOpenNewCourse}
-            className="flex items-center space-x-2 bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Thêm Chuyên đề mới</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Sync Banner & Category Filter Tabs */}
-      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-3xl p-5 text-white shadow-md border border-blue-800/40">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-blue-800/60">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wide flex items-center gap-1.5">
-                <span>4 Chuyên đề Cố định Hệ thống (Mục Tiện ích App Mobile)</span>
-                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2 py-0.5 rounded-full font-mono">
-                  Không thể xóa
-                </span>
-              </h3>
-              <p className="text-xs text-slate-300 mt-0.5">
-                Các chuyên đề gốc luôn được bảo vệ và đồng bộ với giao diện Tiện ích trên điện thoại. Đồng chí có thể thoải mái thêm/sửa/xóa bài học bên trong hoặc tạo chuyên đề mới.
-              </p>
-            </div>
+            <button
+              id="create-new-course-header-btn"
+              onClick={handleOpenNewCourse}
+              className="flex items-center space-x-2 bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Thêm Chuyên đề mới</span>
+            </button>
           </div>
         </div>
 
         {/* Quick Category Filters */}
-        <div className="flex flex-wrap items-center gap-2 pt-4">
+        <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
           <button
             onClick={() => setCategoryFilter('ALL')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
               categoryFilter === 'ALL'
-                ? 'bg-amber-500 text-slate-950 shadow-sm'
-                : 'bg-white/10 hover:bg-white/20 text-white'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
             Tất cả ({courses.length})
@@ -336,11 +305,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             onClick={() => setCategoryFilter('GDCT')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
               categoryFilter === 'GDCT'
-                ? 'bg-blue-500 text-white shadow-sm'
-                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
-            <Lock className="w-3 h-3 text-amber-300" />
+            <Lock className="w-3 h-3 text-amber-500" />
             <span>GDCT</span>
           </button>
 
@@ -348,11 +317,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             onClick={() => setCategoryFilter('GDPL')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
               categoryFilter === 'GDPL'
-                ? 'bg-blue-500 text-white shadow-sm'
-                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
-            <Lock className="w-3 h-3 text-amber-300" />
+            <Lock className="w-3 h-3 text-amber-500" />
             <span>GDPL & TỦ SÁCH PHÁP LUẬT</span>
           </button>
 
@@ -360,11 +329,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             onClick={() => setCategoryFilter('LICH_SU')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
               categoryFilter === 'LICH_SU'
-                ? 'bg-blue-500 text-white shadow-sm'
-                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
-            <Lock className="w-3 h-3 text-amber-300" />
+            <Lock className="w-3 h-3 text-amber-500" />
             <span>Lịch sử truyền thống</span>
           </button>
 
@@ -372,11 +341,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             onClick={() => setCategoryFilter('BIEN_DAO')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
               categoryFilter === 'BIEN_DAO'
-                ? 'bg-blue-500 text-white shadow-sm'
-                : 'bg-white/10 hover:bg-white/20 text-blue-200'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
-            <Lock className="w-3 h-3 text-amber-300" />
+            <Lock className="w-3 h-3 text-amber-500" />
             <span>Biển đảo Việt Nam</span>
           </button>
 
@@ -384,8 +353,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             onClick={() => setCategoryFilter('CUSTOM')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
               categoryFilter === 'CUSTOM'
-                ? 'bg-emerald-500 text-white shadow-sm'
-                : 'bg-white/10 hover:bg-white/20 text-emerald-200'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
             }`}
           >
             Chuyên đề mới tạo
@@ -451,23 +420,18 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
               const isExpanded = !!expandedCourseIds[course.id];
               const courseLessons = lessons.filter((l) => l.courseId === course.id && !l.isDeleted);
               const isFixed = course.isFixed !== undefined ? course.isFixed : isFixedCourse(course);
-              const catDef = getFixedCourseCategory(course);
 
               return (
                 <div
                   key={course.id}
-                  className={`bg-white rounded-3xl border shadow-sm overflow-hidden transition-all ${
-                    isFixed ? 'border-blue-200/90 ring-1 ring-blue-500/10' : 'border-slate-200/80'
-                  }`}
+                  className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden transition-all"
                 >
                   {/* Course Header Bar */}
-                  <div className={`p-4 lg:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 ${
-                    isFixed ? 'bg-gradient-to-r from-blue-50/60 to-slate-50/80' : 'bg-slate-50/80'
-                  }`}>
-                    <div className="flex items-start space-x-3 flex-1 min-w-0">
+                  <div className="p-4 lg:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/80">
+                    <div className="flex items-center space-x-3 flex-1 min-w-0">
                       <button
                         onClick={() => toggleCourseExpand(course.id)}
-                        className="p-1.5 rounded-lg bg-white text-slate-700 hover:bg-slate-100 mt-1 border border-slate-200 shrink-0 shadow-sm"
+                        className="p-1.5 rounded-lg bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 shrink-0 shadow-sm"
                       >
                         {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       </button>
@@ -478,34 +442,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          {isFixed ? (
-                            <>
-                              <span className="text-[10px] font-extrabold uppercase bg-blue-700 text-white px-2 py-0.5 rounded shadow-sm flex items-center gap-1">
-                                <Lock className="w-3 h-3 text-amber-300" />
-                                CỐ ĐỊNH (TIỆN ÍCH APP)
-                              </span>
-                              {catDef && (
-                                <span className="text-[10px] font-extrabold uppercase bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded">
-                                  {catDef.shortTitle}
-                                </span>
-                              )}
-                            </>
-                          ) : (
-                            <span className="text-[10px] font-extrabold uppercase bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded shadow-sm">
-                              CHUYÊN ĐỀ MỚI TẠO
-                            </span>
-                          )}
-
                           <span className="text-[10px] font-extrabold uppercase bg-amber-500 text-slate-950 px-2 py-0.5 rounded shadow-sm">
                             NĂM {course.year}
-                          </span>
-                          {course.code && (
-                            <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-800 px-2 py-0.5 rounded border border-slate-300">
-                              Mã: {course.code}
-                            </span>
-                          )}
-                          <span className="text-[10px] font-mono text-slate-600 bg-slate-200/70 px-1.5 py-0.5 rounded border border-slate-300">
-                            v{course.version}
                           </span>
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -524,17 +462,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                           </span>
                         </div>
 
-                        <h3 className="text-base font-bold text-slate-900 mt-1 truncate flex items-center gap-2">
-                          <span>{course.title}</span>
-                          {isFixed && (
-                            <span title="Chuyên đề cố định đồng bộ Tiện ích App" className="text-blue-600">
-                              <ShieldCheck className="w-4 h-4 inline" />
-                            </span>
-                          )}
+                        <h3 className="text-base font-bold text-slate-900 mt-1 truncate">
+                          {course.title}
                         </h3>
-                        <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">
-                          {course.description || 'Chương trình giáo dục chính trị Vùng 4 Hải Quân.'}
-                        </p>
                       </div>
                     </div>
 

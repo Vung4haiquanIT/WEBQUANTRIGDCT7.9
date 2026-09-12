@@ -3,19 +3,18 @@ import {
   LayoutDashboard, 
   BookOpen, 
   FileSpreadsheet,
+  Radio,
   Users, 
   Building2, 
   TrendingUp, 
   Bell, 
-  Settings,
-  ShieldCheck,
   Layers,
   Image as ImageIcon,
   MessageSquareText
 } from 'lucide-react';
 import { DongSonDrum, DongSonBorder } from './DongSonMotif';
 
-export type NavTab = 'dashboard' | 'courses' | 'exams' | 'feedbacks' | 'users' | 'units' | 'banners' | 'progress' | 'notifications' | 'settings' | 'firebase-diagnostics';
+export type NavTab = 'dashboard' | 'courses' | 'exams' | 'radio' | 'feedbacks' | 'users' | 'units' | 'banners' | 'progress' | 'notifications' | 'settings' | 'firebase-diagnostics';
 
 export interface SidebarProps {
   activeTab: NavTab | string;
@@ -71,6 +70,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: 'MỚI',
     },
     {
+      id: 'radio' as NavTab,
+      label: 'TRUYỀN THANH NỘI BỘ',
+      icon: Radio,
+      badge: 'AUDIO',
+    },
+    {
       id: 'feedbacks' as NavTab,
       label: 'PHẢN ÁNH & GÓP Ý',
       icon: MessageSquareText,
@@ -105,18 +110,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'THÔNG BÁO',
       icon: Bell,
       badge: null,
-    },
-    {
-      id: 'settings' as NavTab,
-      label: 'CÀI ĐẶT',
-      icon: Settings,
-      badge: null,
-    },
-    {
-      id: 'firebase-diagnostics' as NavTab,
-      label: 'CHẨN ĐOÁN FIREBASE',
-      icon: ShieldCheck,
-      badge: 'LIVE',
     },
   ];
 

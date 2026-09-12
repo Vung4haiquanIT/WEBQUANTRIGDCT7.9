@@ -303,5 +303,12 @@ service cloud.firestore {
       allow create, update: if isValidId(bannerId);
       allow delete: if isValidId(bannerId);
     }
+
+    // Radio Broadcast Collection (Truyền thanh nội bộ Vùng 4 Hải quân)
+    match /radio_broadcasts/{broadcastId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(broadcastId);
+      allow delete: if isValidId(broadcastId);
+    }
   }
 }

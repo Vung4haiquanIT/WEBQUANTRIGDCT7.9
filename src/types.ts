@@ -858,4 +858,38 @@ export interface UserFeedback {
   updatedAt: string;
 }
 
+// -------------------------------------------------------------
+// Internal Radio Broadcast / Truyền thanh nội bộ Vùng 4
+// -------------------------------------------------------------
+export type RadioCategory = 
+  | 'BAN_TIN_THOI_SU' 
+  | 'LOI_BAC_DAY' 
+  | 'PHAP_LUAT_KY_LUAT' 
+  | 'TIENG_NOI_CHIEN_SI' 
+  | 'VAN_HOA_VAN_NGHE' 
+  | 'CHUYEN_MUC';
+
+export interface RadioBroadcast {
+  id: string;
+  title: string;                    // Tên chương trình / Bản tin truyền thanh
+  description?: string;              // Tóm tắt nội dung bản tin
+  category: RadioCategory;          // Chuyên mục phát thanh
+  categoryLabel?: string;           // Nhãn hiển thị tiếng Việt
+  audioUrl: string;                 // URL file âm thanh phát thanh (MP3/WAV/Cloudinary)
+  storagePath?: string;
+  cloudinaryPublicId?: string;
+  fileSizeMb?: number;
+  durationSeconds: number;          // Thời lượng (giây)
+  durationFormatted?: string;       // vd: "15:30"
+  broadcastDate: string;            // Ngày phát thanh (YYYY-MM-DD)
+  broadcaster?: string;             // Cơ quan / Ban biên tập (vd: Ban Tuyên huấn Vùng 4)
+  voiceReader?: string;             // Phát thanh viên / Giọng đọc
+  targetUnit: string;               // 'ALL' hoặc Tên đơn vị cụ thể (vd: "Toàn Vùng", "Lữ đoàn 162"...)
+  status: 'PUBLISHED' | 'DRAFT' | 'ARCHIVED'; // Trạng thái phát hành
+  playCount: number;                // Số lượt nghe
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 

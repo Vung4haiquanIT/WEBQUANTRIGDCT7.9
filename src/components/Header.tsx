@@ -78,9 +78,8 @@ export const Header: React.FC<HeaderProps> = ({
         <div>
           <div className="flex items-center space-x-2">
             <span className="text-[10px] font-bold tracking-widest text-amber-300 uppercase bg-amber-500/20 border border-amber-400/30 px-2 py-0.5 rounded">
-              QUÂN CHỦNG HẢI QUÂN
+              VÙNG 4 HẢI QUÂN
             </span>
-            <span className="text-[10px] text-slate-300 font-medium">| VÙNG 4 HẢI QUÂN</span>
           </div>
           <h1 className="text-base font-bold tracking-tight text-white uppercase mt-0.5">
             HỆ THỐNG QUẢN TRỊ GIÁO DỤC CHÍNH TRỊ
@@ -97,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
           >
             <Radio className={`w-3.5 h-3.5 ${isLive ? 'animate-pulse text-emerald-400' : 'text-rose-400'}`} />
-            <span>{isLive ? 'Đồng bộ trực tuyến' : 'Mất kết nối'}</span>
+            <span>{isLive ? 'Hệ thống trực tuyến' : 'Hệ thống ngoại tuyến'}</span>
           </div>
         </div>
       </div>

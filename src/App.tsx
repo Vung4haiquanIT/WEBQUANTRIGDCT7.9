@@ -24,8 +24,7 @@ import { UnitsView } from './views/UnitsView';
 import { BannersView } from './views/BannersView';
 import { ProgressView } from './views/ProgressView';
 import { NotificationsView } from './views/NotificationsView';
-import { SettingsView } from './views/SettingsView';
-import { FirebaseDiagnosticsView } from './views/FirebaseDiagnosticsView';
+import { RadioBroadcastView } from './views/RadioBroadcastView';
 import { LoginView } from './views/LoginView';
 import { Radio, Bell, CheckCircle } from 'lucide-react';
 
@@ -404,6 +403,8 @@ export function App() {
             />
           ) : currentView === 'exams' ? (
             <ExamsView currentUser={adminUser} units={units} users={users} progressList={progressList} />
+          ) : currentView === 'radio' ? (
+            <RadioBroadcastView units={units} currentUser={adminUser as any} />
           ) : currentView === 'feedbacks' ? (
             <FeedbacksView currentUser={adminUser} units={units} />
           ) : currentView === 'users' ? (
@@ -437,11 +438,20 @@ export function App() {
               onCreateNotification={handleCreateNotification}
               onDeleteNotification={handleDeleteNotification}
             />
-          ) : currentView === 'settings' ? (
-            <SettingsView />
-          ) : currentView === 'firebase-diagnostics' ? (
-            <FirebaseDiagnosticsView />
-          ) : null}
+          ) : (
+            <DashboardView
+              courses={courses}
+              lessons={lessons}
+              units={units}
+              users={users}
+              progressList={progressList}
+              notifications={notifications}
+              onNavigate={(tab) => setCurrentView(tab)}
+              onSelectLesson={(l) => {
+                setSelectedLessonForEditing(l);
+              }}
+            />
+          )}
         </main>
       </div>
 

@@ -40,7 +40,8 @@ import {
   ExamSubmission,
   UserFeedback,
   FeedbackType,
-  FeedbackStatus
+  FeedbackStatus,
+  RadioBroadcast
 } from '../types';
 
 /**
@@ -1374,5 +1375,57 @@ export const api = {
 
   listenFeedbacks: (callback: (feedbacks: UserFeedback[]) => void) => {
     return firestoreService.listenFeedbacks(callback);
+  },
+
+  // -------------------------------------------------------------
+  // TRUYỀN THANH NỘI BỘ (Radio Broadcasts)
+  // -------------------------------------------------------------
+  getRadioBroadcasts: async (): Promise<RadioBroadcast[]> => {
+    return await firestoreService.getRadioBroadcasts();
+  },
+
+  createRadioBroadcast: async (data: Partial<RadioBroadcast>): Promise<RadioBroadcast> => {
+    return await firestoreService.createRadioBroadcast(data);
+  },
+
+  updateRadioBroadcast: async (id: string, data: Partial<RadioBroadcast>): Promise<RadioBroadcast> => {
+    return await firestoreService.updateRadioBroadcast(id, data);
+  },
+
+  deleteRadioBroadcast: async (id: string): Promise<{ success: boolean }> => {
+    return await firestoreService.deleteRadioBroadcast(id);
+  },
+
+  incrementRadioPlayCount: async (id: string): Promise<void> => {
+    return await firestoreService.incrementRadioPlayCount(id);
+  },
+
+  listenRadioBroadcasts: (callback: (broadcasts: RadioBroadcast[]) => void) => {
+    return firestoreService.listenRadioBroadcasts(callback);
+  },
+
+  uploadRadioAudioFile: async (file: File, maxRetries = 3): Promise<{
+    secureUrl: string;
+    publicId: string;
+    bytes: number;
+    duration?: number;
+    format?: string;
+    mimeType: string;
+  }> => {
+    const res = await cloudinaryUnsignedSlideProvider.uploadUnsignedSlide(file, {
+      category: 'audios',
+      lessonId: 'radio_broadcasts',
+      filename: `radio_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`,
+      resourceType: 'video'
+    }, maxRetries);
+
+    return {
+      secureUrl: res.secureUrl || res.fileUrl,
+      publicId: res.publicId,
+      bytes: res.bytes || res.size || file.size,
+      duration: res.duration || 0,
+      format: res.format || 'mp3',
+      mimeType: file.type || res.mimeType || 'audio/mp3'
+    };
   }
 };

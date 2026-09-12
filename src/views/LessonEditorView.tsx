@@ -87,6 +87,8 @@ import { naturalSortFilenames } from '../utils/naturalSort';
 import { DongSonDrum } from '../components/DongSonMotif';
 import { parseDocumentFile, generateQuestionsForContent, ParsedDocumentResult } from '../utils/documentParser';
 import { QuillEditor } from '../components/QuillEditor';
+import { UniversalVideoPlayer } from '../components/UniversalVideoPlayer';
+import { parseVideoUrl, getEffectiveVideoThumbnail } from '../utils/videoHelper';
 
 // Uncle Ho Navy / Military Teaching Templates for Quick-Fill
 const UNCLE_HO_PRESETS = [
@@ -266,8 +268,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   const [replacingVideoId, setReplacingVideoId] = useState<string | null>(null);
 
   // Audio Management States
-  const [isAudioModalOpen, setIsAudioModalOpen] = useState(false);
-  const [audioFormData, setAudioFormData] = useState<Partial<AudioItem>>({ durationSeconds: 0 });
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
   const [audioUploadStep, setAudioUploadStep] = useState<string>('');
   const [selectedAudioForPlay, setSelectedAudioForPlay] = useState<AudioItem | null>(null);
@@ -1585,14 +1585,21 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
     e.preventDefault();
     if (!videoFormData.title || !videoFormData.videoUrl) return;
     try {
+      const cleanUrl = videoFormData.videoUrl.trim();
+      const parsed = parseVideoUrl(cleanUrl);
+      const effectiveThumbnail = (videoFormData.thumbnail || '').trim() || parsed.thumbnailUrl || '';
+
       const created = await api.createVideo(currentLesson.id, {
         ...videoFormData,
+        videoUrl: cleanUrl,
+        thumbnail: effectiveThumbnail,
+        mimeType: parsed.type === 'youtube' ? 'video/youtube' : (videoFormData.mimeType || 'video/mp4'),
         order: videos.length + 1
       });
       setVideos([...videos, created]);
       setIsVideoModalOpen(false);
       setVideoFormData({ title: '', description: '', videoUrl: '', thumbnail: '', durationSeconds: 600 });
-      showToast('Đã thêm video tư liệu');
+      showToast('Đã thêm video tư liệu thành công');
     } catch {
       showToast('Lỗi thêm video');
     }
@@ -1707,23 +1714,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
     api.deleteAudioCascade(currentLesson.id, targetAudio.id, targetAudio.cloudinaryPublicId).catch(err => {
       console.warn('Background delete audio warning:', err);
     });
-  };
-
-  const handleCreateAudio = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!audioFormData.title || !audioFormData.audioUrl) return;
-    try {
-      const created = await api.createAudio(currentLesson.id, {
-        ...audioFormData,
-        order: audios.length + 1
-      });
-      setAudios([...audios, created]);
-      setIsAudioModalOpen(false);
-      setAudioFormData({ title: '', description: '', audioUrl: '', durationSeconds: 900 });
-      showToast('Đã thêm audio bài giảng');
-    } catch {
-      showToast('Lỗi thêm audio');
-    }
   };
 
   const handleDeleteAudio = async (id: string) => {
@@ -1871,10 +1861,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
           <Sliders className="w-4 h-4 text-blue-600 shrink-0" />
           <div>
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-              Bật / Tắt thành phần nội dung (Đồng bộ thời gian thực)
-            </span>
-            <span className="text-[11px] text-slate-500">
-              Phần bị tắt sẽ tự động ẩn trên thiết bị của chiến sĩ mà không cần cập nhật ứng dụng
+              Bật / Tắt thành phần nội dung
             </span>
           </div>
         </div>
@@ -2856,9 +2843,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                       Video Tư liệu & Phóng sự Giáo dục Chính trị
                     </h3>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Lưu trữ trên Cloudinary (Folder: <code className="text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded font-mono text-[11px]">GDCT_V4/VIDEOS/{currentLesson.id}</code>) • Hỗ trợ phát trực tuyến và đồng bộ gói Offline
-                  </p>
                   <div className="flex items-center space-x-3 mt-2 text-[11px] text-slate-600 font-mono">
                     <span className="bg-white px-2 py-0.5 rounded border border-slate-200 font-bold text-slate-800">
                       Số lượng: {videos.length} video
@@ -2941,9 +2925,9 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                           onClick={() => setSelectedVideoForPlay(vid)}
                           className="relative aspect-video bg-slate-950 flex items-center justify-center cursor-pointer group overflow-hidden"
                         >
-                          {vid.thumbnail ? (
+                          {getEffectiveVideoThumbnail(vid.thumbnail, vid.videoUrl) ? (
                             <img
-                              src={vid.thumbnail}
+                              src={getEffectiveVideoThumbnail(vid.thumbnail, vid.videoUrl)}
                               alt={vid.title}
                               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 opacity-80"
                             />
@@ -3030,7 +3014,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                           <button
                             onClick={() => setVideoToDelete(vid)}
                             className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
-                            title="Xóa video khỏi hệ thống và Cloudinary"
+                            title="Xóa video khỏi hệ thống"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -3057,9 +3041,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                       Audio Bài giảng & Phát thanh Tuyên truyền
                     </h3>
                   </div>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Lưu trữ trên Cloudinary (Folder: <code className="text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded font-mono text-[11px]">GDCT_V4/AUDIO/{currentLesson.id}</code>) • Phục vụ cán bộ chiến sĩ nghe giảng trên tàu trực và điểm đảo
-                  </p>
                   <div className="flex items-center space-x-3 mt-2 text-[11px] text-slate-600 font-mono">
                     <span className="bg-white px-2 py-0.5 rounded border border-slate-200 font-bold text-slate-800">
                       Số lượng: {audios.length} audio
@@ -3082,14 +3063,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                       className="hidden"
                     />
                   </label>
-
-                  <button
-                    onClick={() => setIsAudioModalOpen(true)}
-                    className="flex items-center space-x-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 px-3.5 py-2.5 rounded-xl font-bold text-xs shadow-2xs transition-all"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Nhập URL thủ công</span>
-                  </button>
                 </div>
               </div>
 
@@ -3182,7 +3155,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                             <button
                               onClick={() => setAudioToDelete(aud)}
                               className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
-                              title="Xóa audio khỏi hệ thống và Cloudinary"
+                              title="Xóa audio khỏi hệ thống"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -3303,31 +3276,25 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                 <input
                   type="text"
                   required
+                  placeholder="Hỗ trợ YouTube, Google Drive, Vimeo hoặc link MP4/WebM trực tiếp..."
                   value={videoFormData.videoUrl || ''}
                   onChange={(e) => setVideoFormData({ ...videoFormData, videoUrl: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 font-mono text-[11px] focus:outline-none focus:border-blue-500"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  💡 Hỗ trợ: YouTube (watch, share youtu.be, embed, shorts), Google Drive (file view), Vimeo, hoặc đường dẫn video trực tiếp.
+                </p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Thời lượng (giây)</label>
-                  <input
-                    type="number"
-                    value={videoFormData.durationSeconds}
-                    onChange={(e) => setVideoFormData({ ...videoFormData, durationSeconds: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Ảnh bìa (URL)</label>
-                  <input
-                    type="text"
-                    value={videoFormData.thumbnail || ''}
-                    onChange={(e) => setVideoFormData({ ...videoFormData, thumbnail: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 font-mono text-[11px] focus:outline-none focus:border-blue-500"
-                  />
-                </div>
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Ảnh bìa (URL)</label>
+                <input
+                  type="text"
+                  placeholder="https://..."
+                  value={videoFormData.thumbnail || ''}
+                  onChange={(e) => setVideoFormData({ ...videoFormData, thumbnail: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 font-mono text-[11px] focus:outline-none focus:border-blue-500"
+                />
               </div>
 
               <div className="flex justify-end space-x-2 pt-2">
@@ -3340,62 +3307,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                 </button>
                 <button type="submit" className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs">
                   Thêm video
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Add Audio */}
-      {isAudioModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-5 space-y-4">
-            <h3 className="text-sm font-bold text-slate-800">Thêm Audio Bài Giảng</h3>
-            <form onSubmit={handleCreateAudio} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Tiêu đề Audio *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ví dụ: Băng ghi âm bài giảng chính trị số 01..."
-                  value={audioFormData.title || ''}
-                  onChange={(e) => setAudioFormData({ ...audioFormData, title: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Đường dẫn Audio (MP3 URL) *</label>
-                <input
-                  type="text"
-                  required
-                  value={audioFormData.audioUrl || ''}
-                  onChange={(e) => setAudioFormData({ ...audioFormData, audioUrl: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 font-mono text-[11px] focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Thời lượng (giây)</label>
-                <input
-                  type="number"
-                  value={audioFormData.durationSeconds}
-                  onChange={(e) => setAudioFormData({ ...audioFormData, durationSeconds: Number(e.target.value) })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-slate-800 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAudioModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl"
-                >
-                  Hủy
-                </button>
-                <button type="submit" className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs">
-                  Thêm audio
                 </button>
               </div>
             </form>
@@ -3416,28 +3327,43 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                   <h3 className="text-sm font-bold text-white truncate">
                     {selectedVideoForPlay.title}
                   </h3>
-                  <p className="text-[11px] text-slate-400 font-mono">
-                    Cloudinary: {selectedVideoForPlay.assetFolder || `GDCT_V4/VIDEOS/${currentLesson.id}`} • {selectedVideoForPlay.fileSizeMb || 0} MB
-                  </p>
+                  {selectedVideoForPlay.fileSizeMb ? (
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      {selectedVideoForPlay.fileSizeMb} MB
+                    </p>
+                  ) : null}
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedVideoForPlay(null)}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white font-bold text-xs transition-colors"
-              >
-                ✕ Đóng
-              </button>
+              <div className="flex items-center space-x-2">
+                {selectedVideoForPlay.videoUrl && (
+                  <a
+                    href={selectedVideoForPlay.videoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 text-blue-400 hover:bg-slate-700 hover:text-blue-300 font-bold text-xs flex items-center space-x-1.5 transition-colors"
+                    title="Mở đường dẫn gốc trong tab mới"
+                  >
+                    <span>Mở tab mới</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                )}
+                <button
+                  onClick={() => setSelectedVideoForPlay(null)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white font-bold text-xs transition-colors"
+                >
+                  ✕ Đóng
+                </button>
+              </div>
             </div>
 
-            <div className="bg-black flex items-center justify-center relative flex-1 min-h-[300px]">
-              <video
-                controls
-                autoPlay
-                src={selectedVideoForPlay.videoUrl}
-                className="w-full max-h-[60vh] object-contain"
-              >
-                Trình duyệt của đồng chí không hỗ trợ xem video trực tiếp.
-              </video>
+            <div className="bg-black flex items-center justify-center relative flex-1 min-h-[360px] overflow-hidden">
+              <UniversalVideoPlayer
+                videoUrl={selectedVideoForPlay.videoUrl}
+                title={selectedVideoForPlay.title}
+                thumbnail={selectedVideoForPlay.thumbnail}
+                autoPlay={true}
+                className="w-full h-[60vh]"
+              />
             </div>
 
             {selectedVideoForPlay.description && (
@@ -3521,9 +3447,8 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
               <p>
                 Đồng chí có chắc chắn muốn xóa video <strong className="text-slate-900">"{videoToDelete.title}"</strong> không?
               </p>
-              <div className="p-3 bg-red-50 text-red-800 rounded-xl text-[11px] space-y-1">
-                <p>• File video sẽ bị xóa vĩnh viễn trên Cloudinary (Folder: <code className="font-mono">{videoToDelete.assetFolder || 'GDCT_V4/VIDEOS'}</code>).</p>
-                <p>• Dữ liệu bài giảng và liên kết trên thiết bị của chiến sĩ sẽ được tự động đồng bộ gỡ bỏ.</p>
+              <div className="p-3 bg-red-50 text-red-800 rounded-xl text-[11px]">
+                <p>• File video sẽ bị xóa vĩnh viễn.</p>
               </div>
             </div>
 
@@ -3621,9 +3546,8 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
               <p>
                 Đồng chí có chắc chắn muốn xóa audio <strong className="text-slate-900">"{audioToDelete.title}"</strong> không?
               </p>
-              <div className="p-3 bg-red-50 text-red-800 rounded-xl text-[11px] space-y-1">
-                <p>• File âm thanh sẽ bị xóa vĩnh viễn trên Cloudinary (Folder: <code className="font-mono">{audioToDelete.assetFolder || 'GDCT_V4/AUDIO'}</code>).</p>
-                <p>• Dữ liệu bài giảng và phát thanh trên tàu sẽ được tự động đồng bộ gỡ bỏ.</p>
+              <div className="p-3 bg-red-50 text-red-800 rounded-xl text-[11px]">
+                <p>• File âm thanh sẽ bị xóa vĩnh viễn.</p>
               </div>
             </div>
 

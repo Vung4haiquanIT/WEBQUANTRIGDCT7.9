@@ -8,6 +8,7 @@ import {
 import { ExamBank, ExamQuestion, ExamSession, ExamSubmission, Unit, User, UserProgress } from '../types';
 import { api } from '../services/api';
 import { parseExamQuestionsFromExcel, downloadSampleExamExcelTemplate, ParsedExamExcelResult } from '../utils/excelExamParser';
+import { matchSearch } from '../utils/vietnamese';
 import * as XLSX from 'xlsx';
 
 interface ExamsViewProps {
@@ -600,13 +601,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   const filteredReportSubmissions = useMemo(() => {
     return submissions.filter(s => {
       const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
-      const matchUnit = selectedUnitFilter === 'ALL' || !selectedUnitFilter || s.unitName === selectedUnitFilter || (s.unitName && selectedUnitFilter && s.unitName.toLowerCase().includes(selectedUnitFilter.toLowerCase()));
-      const matchSearch = !searchCandidateQuery.trim() || 
-        (s.userName || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        (s.unitName || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        (s.userRank || '').toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        (s.sessionTitle || '').toLowerCase().includes(searchCandidateQuery.toLowerCase());
-      return matchSession && matchUnit && matchSearch;
+      const matchUnit = selectedUnitFilter === 'ALL' || !selectedUnitFilter || s.unitName === selectedUnitFilter || (s.unitName && selectedUnitFilter && matchSearch(s.unitName, selectedUnitFilter));
+      const matchSearchQuery = !searchCandidateQuery.trim() || 
+        matchSearch(s.userName, searchCandidateQuery) ||
+        matchSearch(s.unitName, searchCandidateQuery) ||
+        matchSearch(s.userRank, searchCandidateQuery) ||
+        matchSearch(s.sessionTitle, searchCandidateQuery);
+      return matchSession && matchUnit && matchSearchQuery;
     });
   }, [submissions, selectedSessionFilter, selectedUnitFilter, searchCandidateQuery]);
 
@@ -617,12 +618,12 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       
       const displayName = u.fullName || u.name || '';
       const email = u.email || '';
-      const matchSearch = searchCandidateQuery === '' || 
-        displayName.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        email.toLowerCase().includes(searchCandidateQuery.toLowerCase()) ||
-        uUnit.toLowerCase().includes(searchCandidateQuery.toLowerCase());
+      const matchSearchQuery = !searchCandidateQuery.trim() || 
+        matchSearch(displayName, searchCandidateQuery) ||
+        matchSearch(email, searchCandidateQuery) ||
+        matchSearch(uUnit, searchCandidateQuery);
 
-      return matchUnit && matchSearch;
+      return matchUnit && matchSearchQuery;
     });
   }, [users, selectedUnitFilter, searchCandidateQuery]);
 
@@ -781,48 +782,26 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       }
       
       const stat = map[uName];
-      stat.total += d.examCount;
-      stat.passed += d.passedCount;
-      stat.failed += (d.examCount - d.passedCount);
 
-      const userSubs = submissions.filter(s => {
-        const isUserMatch = s.userId === d.user.id || (s.userName && s.userName === (d.user.fullName || d.user.name));
-        const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
-        return isUserMatch && matchSession;
-      });
-
-      if (userSubs.length > 0) {
-        userSubs.forEach(s => {
-          stat.sumScore += s.score;
-          if (s.score > stat.maxScore) stat.maxScore = s.score;
-          if (s.score < stat.minScore) stat.minScore = s.score;
-
-          if (s.score >= 8.0) stat.excellentCount += 1;
-          else if (s.score >= 6.5) stat.goodCount += 1;
-          else if (s.score >= 5.0) stat.averageCount += 1;
-          else stat.poorCount += 1;
-        });
-
-        const extraAttempts = d.examCount - userSubs.length;
-        if (extraAttempts > 0) {
-          stat.sumScore += d.highestScore * extraAttempts;
-          if (d.highestScore > stat.maxScore) stat.maxScore = d.highestScore;
-          if (d.highestScore < stat.minScore) stat.minScore = d.highestScore;
-
-          if (d.highestScore >= 8.0) stat.excellentCount += extraAttempts;
-          else if (d.highestScore >= 6.5) stat.goodCount += extraAttempts;
-          else if (d.highestScore >= 5.0) stat.averageCount += extraAttempts;
-          else stat.poorCount += extraAttempts;
+      // If this user/soldier took an exam
+      if (d.examCount > 0) {
+        stat.total += 1; // 1 quân nhân dự thi
+        if (d.passedCount > 0 || d.highestScore >= 5.0) {
+          stat.passed += 1; // 1 quân nhân ĐẠT
+        } else {
+          stat.failed += 1; // 1 quân nhân CHƯA ĐẠT
         }
-      } else if (d.examCount > 0) {
-        stat.sumScore += d.highestScore * d.examCount;
-        if (d.highestScore > stat.maxScore) stat.maxScore = d.highestScore;
-        if (d.highestScore < stat.minScore) stat.minScore = d.highestScore;
 
-        if (d.highestScore >= 8.0) stat.excellentCount += d.examCount;
-        else if (d.highestScore >= 6.5) stat.goodCount += d.examCount;
-        else if (d.highestScore >= 5.0) stat.averageCount += d.examCount;
-        else stat.poorCount += d.examCount;
+        // Aggregate scores based on soldier's performance
+        const effectiveScore = d.highestScore;
+        stat.sumScore += effectiveScore;
+        if (effectiveScore > stat.maxScore) stat.maxScore = effectiveScore;
+        if (effectiveScore < stat.minScore) stat.minScore = effectiveScore;
+
+        if (effectiveScore >= 8.0) stat.excellentCount += 1;
+        else if (effectiveScore >= 6.5) stat.goodCount += 1;
+        else if (effectiveScore >= 5.0) stat.averageCount += 1;
+        else stat.poorCount += 1;
       }
     });
 
@@ -1338,22 +1317,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* ========================================================= */}
       {activeTab === 'reports' && (
         <div className="space-y-4">
-          {/* Realtime Sync Status Banner */}
+          {/* Report Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900 text-white p-4 rounded-2xl shadow-sm border border-slate-800">
             <div>
               <h3 className="font-extrabold text-sm flex items-center gap-2 text-emerald-400">
                 <BarChart3 className="w-4 h-4" />
                 <span>Tổng Hợp Báo Cáo Kết Quả Thi Trực Tuyến</span>
               </h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Hệ thống tự động đồng bộ tức thì mọi bài nộp thi từ các tài khoản người dùng tham gia trên App di động.
-              </p>
-            </div>
-            <div className="shrink-0 flex items-center">
-              <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950 text-emerald-400 text-xs font-bold border border-emerald-800/60 shadow-inner">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>Đồng bộ Tức thì (Realtime Cloud)</span>
-              </span>
             </div>
           </div>
 
@@ -1364,7 +1334,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                 <Users className="w-5 h-5" />
               </div>
               <div>
-                <span className="block text-[11px] font-bold text-slate-500 uppercase">Tổng lượt dự thi</span>
+                <span className="block text-[11px] font-bold text-slate-500 uppercase">Tổng số quân nhân dự thi</span>
                 <span className="text-xl font-black text-slate-900">{totalSubmissionsCount}</span>
               </div>
             </div>
@@ -1621,7 +1591,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                   <div>
                     <p className="font-bold text-slate-700 text-sm">Chưa có kết quả bài làm chi tiết nào</p>
                     <p className="text-slate-500 text-xs mt-1 max-w-md mx-auto">
-                      Dữ liệu tổng hợp hiện tại dựa 100% trên các lượt làm bài thực tế của quân nhân. Các bài thi nộp từ App di động hoặc từ bộ Giả lập thi sẽ xuất hiện realtime tại bảng này.
+                      Dữ liệu tổng hợp hiện tại dựa trên các lượt làm bài của quân nhân.
                     </p>
                   </div>
                 </div>
@@ -1702,9 +1672,6 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                   <TrendingUp className="w-4 h-4 text-emerald-400" />
                   <span>Báo Cáo Tổng Hợp Tốc Độ Học Tập & Kết Quả Kiểm Tra Theo Từng Tài Khoản ({accountReportData.length} tài khoản)</span>
                 </h3>
-                <span className="text-[10px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">
-                  Dữ liệu đồng bộ Realtime từ App di động
-                </span>
               </div>
 
               {accountReportData.length === 0 ? (

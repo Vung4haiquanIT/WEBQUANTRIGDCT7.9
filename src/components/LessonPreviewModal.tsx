@@ -59,6 +59,7 @@ import {
 } from '../types';
 import { DongSonDrum } from './DongSonMotif';
 import { api } from '../services/api';
+import { UniversalVideoPlayer } from './UniversalVideoPlayer';
 
 interface LessonPreviewModalProps {
   lesson: Lesson;
@@ -425,7 +426,7 @@ export const LessonPreviewModal: React.FC<LessonPreviewModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-5xl max-h-[96vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-xl max-h-[96vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
         
         {/* TOP HEADER BAR */}
         <div className="bg-slate-900 p-3.5 sm:p-4 border-b border-slate-800 flex items-center justify-between text-white">
@@ -510,8 +511,8 @@ export const LessonPreviewModal: React.FC<LessonPreviewModalProps> = ({
           </div>
         )}
 
-        {/* MAIN BODY: SIMULATOR & MONITOR */}
-        <div className="flex-1 overflow-hidden p-3 sm:p-5 flex flex-col lg:flex-row items-center justify-center gap-5 bg-slate-100">
+        {/* MAIN BODY: SIMULATOR */}
+        <div className="flex-1 overflow-auto p-4 sm:p-6 flex items-center justify-center bg-slate-100">
           
           {/* PHONE FRAME */}
           <div className="w-[380px] h-[640px] bg-slate-900 rounded-[44px] border-[6px] border-slate-800 shadow-2xl flex flex-col overflow-hidden relative shrink-0">
@@ -1203,37 +1204,19 @@ export const LessonPreviewModal: React.FC<LessonPreviewModalProps> = ({
                                       Gói ngoại tuyến này không bao gồm video để tiết kiệm bộ nhớ thiết bị.
                                     </p>
                                   </div>
-                                ) : hasError || !validVideoUrl ? (
+                                ) : !validVideoUrl ? (
                                   <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-300 p-4 text-center space-y-2">
                                     <AlertCircle className="w-8 h-8 text-red-400" />
-                                    <span className="text-xs font-bold text-white">Không thể tải luồng video</span>
-                                    <p className="text-[10px] text-slate-400 max-w-xs leading-relaxed">
-                                      Không thể phát video từ Cloudinary CDN. Vui lòng kiểm tra định dạng hoặc thử lại.
-                                    </p>
-                                    <button
-                                      onClick={() => setVideoErrorMap(prev => ({ ...prev, [vid.id]: false }))}
-                                      className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-blue-400 text-[10px] font-bold rounded-lg transition-colors cursor-pointer"
-                                    >
-                                      Thử tải lại
-                                    </button>
+                                    <span className="text-xs font-bold text-white">Chưa có liên kết video</span>
                                   </div>
                                 ) : (
-                                  <video
-                                    key={validVideoUrl}
-                                    controls
-                                    playsInline
-                                    preload="metadata"
-                                    src={validVideoUrl}
-                                    poster={vid.thumbnail && !vid.thumbnail.endsWith('.mp4') ? vid.thumbnail : undefined}
-                                    onError={() => {
-                                      console.error('Video player load error for:', vid.title, validVideoUrl);
-                                      setVideoErrorMap(prev => ({ ...prev, [vid.id]: true }));
-                                    }}
-                                    className="w-full h-full object-contain bg-black"
-                                  >
-                                    <source src={validVideoUrl} type={vid.mimeType || 'video/mp4'} />
-                                    Trình duyệt không hỗ trợ phát thẻ video HTML5.
-                                  </video>
+                                  <UniversalVideoPlayer
+                                    videoUrl={validVideoUrl}
+                                    title={vid.title}
+                                    thumbnail={vid.thumbnail}
+                                    autoPlay={false}
+                                    className="w-full h-full"
+                                  />
                                 )}
 
                                 {/* Top Floating badges on video */}
@@ -1374,95 +1357,10 @@ export const LessonPreviewModal: React.FC<LessonPreviewModalProps> = ({
               <div className="w-28 h-1 bg-zinc-600 rounded-full"></div>
             </div>
           </div>
-
-          {/* SIDE INSPECTOR: ANDROID OFFLINE STORAGE & ROOM SYNC MONITOR */}
-          <div className="w-full lg:w-80 bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4 text-xs">
-            <div className="flex items-center space-x-2 pb-3 border-b border-slate-200">
-              <HardDrive className="w-4 h-4 text-blue-600" />
-              <span className="font-bold text-slate-800">Kiến trúc Online-First & Offline</span>
-            </div>
-
-            {/* Mode & Storage Architecture Card */}
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-700">Mô hình hoạt động:</span>
-                <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-blue-100 text-blue-800">
-                  ON-DEMAND OFFLINE
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-600 leading-relaxed">
-                Tách biệt <strong>TEMP CACHE</strong> (bộ nhớ tạm HTTP) và <strong>OFFLINE STORAGE</strong> (Room DB + Persistent Files).
-              </p>
-              <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-1.5 text-[10px]">
-                <div className="bg-white p-2 rounded border border-slate-200">
-                  <div className="text-slate-500">Trạng thái bài học:</div>
-                  <div className="font-bold text-slate-800">
-                    {offlineRecord ? 'OFFLINE READY' : 'ONLINE ONLY'}
-                  </div>
-                </div>
-                <div className="bg-white p-2 rounded border border-slate-200">
-                  <div className="text-slate-500">Bản trên máy:</div>
-                  <div className="font-bold text-slate-800">
-                    {offlineRecord ? `v${offlineRecord.localVersion}` : 'Chưa tải'}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Local Progress Monitor (Room DB - Per-Module independent tracking) */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700">Tiến độ ghi nhận (Room DB):</span>
-                <span className="font-bold text-blue-600 text-sm font-mono">{localProgress.overallProgress}%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                <div className="bg-blue-600 h-full rounded-full transition-all" style={{ width: `${localProgress.overallProgress}%` }} />
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-600 pt-1">
-                <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-200 flex flex-col">
-                  <span className="text-slate-400 font-medium">Theo Slide:</span>
-                  <strong className="text-blue-700 font-mono text-xs">{localProgress.slideProgress}%</strong>
-                </div>
-                <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-200 flex flex-col">
-                  <span className="text-slate-400 font-medium">Theo Nội dung:</span>
-                  <strong className="text-indigo-700 font-mono text-xs">{localProgress.contentProgress}%</strong>
-                </div>
-              </div>
-              <p className="text-[9px] text-slate-400 italic">
-                * Tiến độ tính độc lập theo Slide hoặc theo Nội dung (không cộng chia 4 phần).
-              </p>
-            </div>
-
-            {/* Offline Progress Sync Queue */}
-            <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/50 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700">Hàng đợi đồng bộ tiến độ:</span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-bold text-[10px]">
-                  {pendingSyncCount} bản ghi
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-500">
-                Ghi nhận vào Room DB ngay cả khi mất mạng; tự động đồng bộ lên máy chủ khi có kết nối trở lại.
-              </p>
-
-              <button
-                disabled={isOfflineMode || isSyncing || pendingSyncCount === 0}
-                onClick={handleSyncPendingProgress}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-xs transition-all cursor-pointer"
-              >
-                <CloudUpload className="w-3.5 h-3.5" />
-                <span>{isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ tiến độ lên máy chủ'}</span>
-              </button>
-            </div>
-          </div>
         </div>
 
-        {/* FOOTER INFO */}
-        <div className="bg-slate-50 p-3 border-t border-slate-200 flex items-center justify-between text-xs text-slate-600 px-6">
-          <div className="flex items-center space-x-2">
-            <Info className="w-4 h-4 text-blue-600 shrink-0" />
-            <span>Mô hình Online-First bảo vệ bộ nhớ điện thoại chiến sĩ, chỉ lưu trữ khi có lệnh chủ động.</span>
-          </div>
+        {/* FOOTER */}
+        <div className="bg-slate-50 p-3 border-t border-slate-200 flex items-center justify-end text-xs text-slate-600 px-6">
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs transition-colors shadow-xs cursor-pointer"

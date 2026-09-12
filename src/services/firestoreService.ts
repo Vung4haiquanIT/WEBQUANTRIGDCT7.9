@@ -48,7 +48,8 @@ import {
   ExamSession,
   ExamSubmission,
   UserFeedback,
-  FeedbackStatus
+  FeedbackStatus,
+  RadioBroadcast
 } from '../types';
 import { 
   isFixedCourse, 
@@ -3678,6 +3679,188 @@ export const firestoreService = {
       callback(list);
     }, (err) => {
       console.warn('[listenFeedbacks warning]:', err);
+      callback([]);
+    });
+  },
+
+  // -------------------------------------------------------------
+  // TRUYỀN THANH NỘI BỘ (Radio Broadcasts Vùng 4 Hải Quân)
+  // -------------------------------------------------------------
+  getRadioBroadcasts: async (): Promise<RadioBroadcast[]> => {
+    try {
+      const colRef = collection(db, 'radio_broadcasts');
+      const q = query(colRef, orderBy('broadcastDate', 'desc'));
+      const snap = await getDocs(q);
+      const broadcasts = snap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as RadioBroadcast);
+      
+      // Seed default broadcasts if collection is completely empty
+      if (broadcasts.length === 0) {
+        const initDocRef = doc(db, 'system_settings', 'radio_init');
+        const initSnap = await getDoc(initDocRef);
+        if (!initSnap.exists()) {
+          const defaultItems: RadioBroadcast[] = [
+            {
+              id: 'radio-v4-01',
+              title: 'Bản tin Truyền thanh Nội bộ Vùng 4 - Số đặc biệt chào mừng Ngày truyền thống Quân chủng Hải quân',
+              description: 'Điểm tin hoạt động huấn luyện, sẵn sàng chiến đấu; công tác giáo dục chính trị tư tưởng; gương cán bộ chiến sĩ tiêu biểu và chuyên mục Hỏi đáp Pháp luật Quân sự.',
+              category: 'BAN_TIN_THOI_SU',
+              categoryLabel: 'Bản tin Thời sự Vùng',
+              audioUrl: 'https://commondatastorage.googleapis.com/codeskulptor-demos/DDR_assets/Sevish_-__nbsp_.mp3',
+              durationSeconds: 930,
+              durationFormatted: '15:30',
+              broadcastDate: '2026-09-12',
+              broadcaster: 'Ban Tuyên huấn Vùng 4',
+              voiceReader: 'Đại úy Nguyễn Văn Hưng - BTV Thu Hà',
+              targetUnit: 'Toàn Vùng',
+              status: 'PUBLISHED',
+              playCount: 142,
+              order: 1,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            },
+            {
+              id: 'radio-v4-02',
+              title: 'Chuyên mục: Lời Bác dạy cán bộ, chiến sĩ Hải quân - Bài học sâu sắc giữ vững chủ quyền biển, đảo',
+              description: 'Phân tích hoàn cảnh ra đời và giá trị thực tiễn Lời dạy của Chủ tịch Hồ Chí Minh khi về thăm bộ đội Hải quân: "Ngày trước ta chỉ có đêm và rừng. Ngày nay ta có ngày, có trời, có biển...".',
+              category: 'LOI_BAC_DAY',
+              categoryLabel: 'Lời Bác dạy ngày này năm xưa',
+              audioUrl: 'https://commondatastorage.googleapis.com/codeskulptor-assets/Epoq-Lepidoptera.ogg',
+              durationSeconds: 615,
+              durationFormatted: '10:15',
+              broadcastDate: '2026-09-11',
+              broadcaster: 'Phòng Chính trị Vùng 4',
+              voiceReader: 'Thiếu tá Trần Minh Tuấn',
+              targetUnit: 'Toàn Vùng',
+              status: 'PUBLISHED',
+              playCount: 98,
+              order: 2,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            },
+            {
+              id: 'radio-v4-03',
+              title: 'Chuyên đề: Pháp luật Nhà nước & Kỷ luật Quân đội - Nhận diện và phòng ngừa vi phạm kỷ luật',
+              description: 'Tuyên truyền các quy định về an toàn giao thông, kỷ luật bí mật quân sự, quy tắc văn hóa ứng xử trên không gian mạng của quân nhân trong tình hình mới.',
+              category: 'PHAP_LUAT_KY_LUAT',
+              categoryLabel: 'Pháp luật & Kỷ luật Quân đội',
+              audioUrl: 'https://commondatastorage.googleapis.com/codeskulptor-demos/pyman_assets/intromusic.ogg',
+              durationSeconds: 780,
+              durationFormatted: '13:00',
+              broadcastDate: '2026-09-08',
+              broadcaster: 'Ủy ban Kiểm tra Đảng ủy Vùng 4',
+              voiceReader: 'Trung tá Lê Hoàng Nam',
+              targetUnit: 'Toàn Vùng',
+              status: 'PUBLISHED',
+              playCount: 75,
+              order: 3,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            },
+            {
+              id: 'radio-v4-04',
+              title: 'Tiếng nói Chiến sĩ: Nhịp sống đảo Trường Sa và những lá thư gửi về đất liền',
+              description: 'Ghi nhanh tâm tư, tình cảm và tinh thần vượt khó, sẵn sàng chiến đấu canh giữ biển trời Tổ quốc của cán bộ, chiến sĩ các điểm đảo Trường Sa.',
+              category: 'TIENG_NOI_CHIEN_SI',
+              categoryLabel: 'Tiếng nói Chiến sĩ',
+              audioUrl: 'https://commondatastorage.googleapis.com/codeskulptor-demos/pang_pause.mp3',
+              durationSeconds: 840,
+              durationFormatted: '14:00',
+              broadcastDate: '2026-09-05',
+              broadcaster: 'Đài Truyền thanh Lữ đoàn 146',
+              voiceReader: 'Thượng úy Bùi Quốc Huy',
+              targetUnit: 'Toàn Vùng',
+              status: 'PUBLISHED',
+              playCount: 120,
+              order: 4,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }
+          ];
+
+          for (const item of defaultItems) {
+            await setDoc(doc(db, 'radio_broadcasts', item.id), item).catch(() => {});
+          }
+          await setDoc(initDocRef, { initializedAt: new Date().toISOString() }).catch(() => {});
+          return defaultItems;
+        }
+      }
+
+      return broadcasts;
+    } catch (err) {
+      console.error('[firestoreService.getRadioBroadcasts error]:', err);
+      return [];
+    }
+  },
+
+  createRadioBroadcast: async (data: Partial<RadioBroadcast>): Promise<RadioBroadcast> => {
+    const id = data.id || `radio-${Date.now()}`;
+    const docRef = doc(db, 'radio_broadcasts', id);
+    const now = new Date().toISOString();
+    
+    const broadcast: RadioBroadcast = {
+      id,
+      title: data.title || 'Bản tin truyền thanh nội bộ',
+      description: data.description || '',
+      category: data.category || 'BAN_TIN_THOI_SU',
+      categoryLabel: data.categoryLabel || 'Bản tin Thời sự Vùng',
+      audioUrl: data.audioUrl || '',
+      storagePath: data.storagePath || '',
+      cloudinaryPublicId: data.cloudinaryPublicId || '',
+      fileSizeMb: data.fileSizeMb || 0,
+      durationSeconds: data.durationSeconds || 0,
+      durationFormatted: data.durationFormatted || '00:00',
+      broadcastDate: data.broadcastDate || new Date().toISOString().split('T')[0],
+      broadcaster: data.broadcaster || 'Ban Tuyên huấn Vùng 4',
+      voiceReader: data.voiceReader || '',
+      targetUnit: data.targetUnit || 'Toàn Vùng',
+      status: data.status || 'PUBLISHED',
+      playCount: data.playCount || 0,
+      order: data.order || 1,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    await setDoc(docRef, sanitizeFirestoreData(broadcast));
+    return broadcast;
+  },
+
+  updateRadioBroadcast: async (id: string, updates: Partial<RadioBroadcast>): Promise<RadioBroadcast> => {
+    const docRef = doc(db, 'radio_broadcasts', id);
+    const now = new Date().toISOString();
+    const payload = sanitizeFirestoreData({
+      ...updates,
+      updatedAt: now
+    });
+    await updateDoc(docRef, payload);
+    const snap = await getDoc(docRef);
+    return { ...(snap.data() as any), id } as RadioBroadcast;
+  },
+
+  deleteRadioBroadcast: async (id: string): Promise<{ success: boolean }> => {
+    const docRef = doc(db, 'radio_broadcasts', id);
+    await deleteDoc(docRef);
+    return { success: true };
+  },
+
+  incrementRadioPlayCount: async (id: string): Promise<void> => {
+    try {
+      const docRef = doc(db, 'radio_broadcasts', id);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const currentCount = snap.data().playCount || 0;
+        await updateDoc(docRef, { playCount: currentCount + 1 });
+      }
+    } catch {}
+  },
+
+  listenRadioBroadcasts: (callback: (broadcasts: RadioBroadcast[]) => void) => {
+    const colRef = collection(db, 'radio_broadcasts');
+    return onSnapshot(colRef, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id }) as RadioBroadcast);
+      list.sort((a, b) => (b.broadcastDate || '').localeCompare(a.broadcastDate || ''));
+      callback(list);
+    }, (err) => {
+      console.warn('[listenRadioBroadcasts warning]:', err);
       callback([]);
     });
   }

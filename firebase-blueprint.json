@@ -689,6 +689,68 @@
         }
       },
       "required": ["id", "category", "entityId", "storagePath", "downloadUrl", "version", "createdAt"]
+    },
+    "RadioBroadcast": {
+      "title": "RadioBroadcast",
+      "description": "Bản tin và chương trình truyền thanh nội bộ Vùng 4 Hải Quân",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã bản tin truyền thanh"
+        },
+        "title": {
+          "type": "string",
+          "description": "Tên chương trình truyền thanh"
+        },
+        "description": {
+          "type": "string",
+          "description": "Tóm tắt nội dung bản tin"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["BAN_TIN_THOI_SU", "LOI_BAC_DAY", "PHAP_LUAT_KY_LUAT", "TIENG_NOI_CHIEN_SI", "VAN_HOA_VAN_NGHE", "CHUYEN_MUC"]
+        },
+        "audioUrl": {
+          "type": "string",
+          "description": "Đường dẫn file âm thanh phát thanh"
+        },
+        "durationSeconds": {
+          "type": "number",
+          "description": "Thời lượng phát thanh tính theo giây"
+        },
+        "broadcastDate": {
+          "type": "string",
+          "description": "Ngày phát thanh YYYY-MM-DD"
+        },
+        "broadcaster": {
+          "type": "string",
+          "description": "Cơ quan / Ban biên tập phát thanh"
+        },
+        "targetUnit": {
+          "type": "string",
+          "description": "Đơn vị tiếp sóng"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PUBLISHED", "DRAFT", "ARCHIVED"]
+        },
+        "playCount": {
+          "type": "number"
+        },
+        "order": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "category", "audioUrl", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -715,6 +777,10 @@
     "/audios/{audioId}": {
       "schema": "Audio",
       "description": "Metadata Audio bài giảng trên Cloud Storage"
+    },
+    "/radio_broadcasts/{broadcastId}": {
+      "schema": "RadioBroadcast",
+      "description": "Bản tin truyền thanh nội bộ Vùng 4 Hải quân"
     },
     "/units/{unitId}": {
       "schema": "Unit",
