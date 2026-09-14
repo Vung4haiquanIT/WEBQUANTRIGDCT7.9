@@ -958,7 +958,7 @@ export const api = {
       id,
       name: displayName,
       fullName: displayName,
-      email: data.email || 'quan.nhan@vung4.vn',
+      email: data.email || 'quan.nhan@v4.hq',
       password: data.password || '123@abc',
       role: firestoreRole,
       rank: data.rank || 'Đại úy',

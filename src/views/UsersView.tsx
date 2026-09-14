@@ -20,8 +20,11 @@ import {
   Smartphone,
   Lock,
   Unlock,
-  Users
+  Users,
+  Upload,
+  FileSpreadsheet
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { User, UserRole, Unit, UserProgress, ExamSubmission, UserFeedback } from '../types';
 import { matchSearch } from '../utils/vietnamese';
 import { api } from '../services/api';
@@ -82,6 +85,13 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
   // Success Notification Dialog State (Replaces blocked window.alert in iframe)
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // Excel Import State
+  const [parsedUsers, setParsedUsers] = useState<any[]>([]);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isImportSaving, setIsImportSaving] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
 
   // Form State
   const [formData, setFormData] = useState({
@@ -134,6 +144,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
   const handleOpenNew = () => {
     setEditingUser(null);
+    setFormError(null);
     if (units.length === 0) {
       setIsCreatingNewUnit(true);
       setNewUnitName('');
@@ -170,6 +181,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
   const handleOpenEdit = (u: User) => {
     setEditingUser(u);
+    setFormError(null);
     const normRole = normalizeRole(u.role);
     const r = u.rank || '';
     const p = u.position || '';
@@ -348,6 +360,22 @@ export const UsersView: React.FC<UsersViewProps> = ({
       status: formData.status,
     };
 
+    // Validate duplicate email check
+    const emailLower = (payload.email || '').trim().toLowerCase();
+    if (editingUser) {
+      const isDuplicate = users.some(u => u.id !== editingUser.id && u.email.trim().toLowerCase() === emailLower);
+      if (isDuplicate) {
+        setFormError(`Tài khoản "${payload.email}" đã được sử dụng bởi người dùng khác. Vui lòng nhập tài khoản khác!`);
+        return;
+      }
+    } else {
+      const isDuplicate = users.some(u => u.email.trim().toLowerCase() === emailLower);
+      if (isDuplicate) {
+        setFormError(`Tài khoản "${payload.email}" đã tồn tại trên hệ thống. Vui lòng sử dụng tên tài khoản khác!`);
+        return;
+      }
+    }
+
     try {
       setIsSaving(true);
       if (editingUser) {
@@ -361,6 +389,254 @@ export const UsersView: React.FC<UsersViewProps> = ({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Excel Import, Edit & Save Handlers
+  const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        setSuccessMessage("File Excel không có dữ liệu hoặc trang tính trống.");
+        return;
+      }
+
+      const firstSheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[firstSheetName];
+      const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' });
+
+      if (rows.length < 2) {
+        setSuccessMessage("File Excel quá ngắn hoặc không chứa dữ liệu tài khoản ở dòng thứ 2 trở đi.");
+        return;
+      }
+
+      // Detect header row vs data row
+      const firstRowStr = rows[0].map(c => String(c).toLowerCase());
+      const hasHeader = firstRowStr.some(str => 
+        str.includes('họ và tên') || str.includes('họ tên') || str.includes('tài khoản') || str.includes('email') || str.includes('đơn vị')
+      );
+
+      const startIndex = hasHeader ? 1 : 1;
+      const tempParsedUsers: any[] = [];
+
+      for (let r = startIndex; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || row.length < 1) continue;
+
+        // Skip completely empty row
+        const isRowEmpty = row.every(cell => String(cell).trim() === '');
+        if (isRowEmpty) continue;
+
+        const rawFullName = String(row[0] || '').trim();
+        const rawRankAndPosition = String(row[1] || '').trim();
+        // Cột 3 (index 2) bỏ qua hoặc STT, đọc Đơn vị từ cột 4 (index 3)
+        const rawUnitName = String(row[3] || row[2] || '').trim();
+        let rawEmail = String(row[4] || '').trim().toLowerCase();
+        const rawPassword = String(row[5] || '').trim() || '123@abc';
+
+        if (!rawFullName) continue;
+
+        // Format Email auto append @v4.hq if missing
+        if (rawEmail) {
+          if (!rawEmail.includes('@')) {
+            rawEmail = `${rawEmail}@v4.hq`;
+          }
+        } else {
+          // Generate default email from Full Name
+          const cleanName = rawFullName
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase()
+            .replace(/[đĐ]/g, "d")
+            .replace(/[^a-z0-9\s]/g, "");
+          const nameParts = cleanName.split(/\s+/).filter(Boolean);
+          if (nameParts.length > 0) {
+            const lastName = nameParts[nameParts.length - 1];
+            const firstLetters = nameParts.slice(0, -1).map(p => p[0]).join('');
+            rawEmail = `${lastName}${firstLetters}@v4.hq`;
+          } else {
+            rawEmail = `quannhan_${Date.now()}_${r}@v4.hq`;
+          }
+        }
+
+        // Parse Rank and Position
+        let rRank = 'Đại úy';
+        let rPosition = 'Chính trị viên';
+        if (rawRankAndPosition) {
+          const parts = rawRankAndPosition.split('-');
+          if (parts.length >= 2) {
+            rRank = parts[0].trim();
+            rPosition = parts.slice(1).join('-').trim();
+          } else {
+            rRank = rawRankAndPosition.trim();
+            rPosition = 'Quân nhân';
+          }
+        }
+
+        // Match existing units
+        const matchedUnit = units.find(u => 
+          u.name.toLowerCase().includes(rawUnitName.toLowerCase()) || 
+          rawUnitName.toLowerCase().includes(u.name.toLowerCase())
+        );
+        const unitId = matchedUnit ? matchedUnit.id : (units[0]?.id || 'unit-1');
+        const unitName = matchedUnit ? matchedUnit.name : (rawUnitName || 'Bộ Tư lệnh Vùng 4 Hải Quân');
+
+        tempParsedUsers.push({
+          id: `temp-${Date.now()}-${r}-${Math.random()}`,
+          fullName: rawFullName,
+          name: rawFullName,
+          rankAndPosition: rawRankAndPosition || `${rRank} - ${rPosition}`,
+          rank: rRank,
+          position: rPosition,
+          unitId: unitId,
+          unit: unitName,
+          email: rawEmail,
+          password: rawPassword,
+          role: 'USER',
+          status: 'ACTIVE'
+        });
+      }
+
+      if (tempParsedUsers.length === 0) {
+        setSuccessMessage("Không đọc được tài khoản hợp lệ nào từ file Excel. Vui lòng kiểm tra lại định dạng.");
+      } else {
+        setParsedUsers(tempParsedUsers);
+        setIsImportModalOpen(true);
+      }
+    } catch (error: any) {
+      console.error(error);
+      setSuccessMessage(`Lỗi đọc file Excel: ${error.message}`);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleUpdateParsedUser = (id: string, field: string, value: string) => {
+    setParsedUsers(prev => prev.map(u => {
+      if (u.id === id) {
+        const updated = { ...u, [field]: value };
+        if (field === 'fullName') {
+          updated.name = value;
+        }
+        if (field === 'rankAndPosition') {
+          const parts = value.split('-');
+          updated.rank = parts[0]?.trim() || '';
+          updated.position = parts[1]?.trim() || '';
+        }
+        return updated;
+      }
+      return u;
+    }));
+  };
+
+  const handleDeleteParsedUser = (id: string) => {
+    setParsedUsers(prev => prev.filter(u => u.id !== id));
+  };
+
+  const handleSaveAllImported = async () => {
+    if (parsedUsers.length === 0) return;
+    setIsImportSaving(true);
+    setImportProgress({ current: 0, total: parsedUsers.length });
+
+    let successCount = 0;
+    let duplicateCount = 0;
+    let errorCount = 0;
+
+    // Track emails processed in this batch to prevent internal batch duplicates
+    const processedEmails = new Set<string>();
+
+    for (let i = 0; i < parsedUsers.length; i++) {
+      const u = parsedUsers[i];
+      const emailLower = (u.email || '').trim().toLowerCase();
+
+      // Check if email already exists in system users
+      const existsInSystem = users.some(existUser => (existUser.email || '').trim().toLowerCase() === emailLower);
+
+      if (existsInSystem || processedEmails.has(emailLower)) {
+        duplicateCount++;
+        setImportProgress(prev => ({ ...prev, current: i + 1 }));
+        continue;
+      }
+
+      processedEmails.add(emailLower);
+
+      try {
+        const payload = {
+          name: u.fullName,
+          fullName: u.fullName,
+          email: u.email,
+          password: u.password,
+          role: u.role,
+          rank: u.rank,
+          position: u.position,
+          rankAndPosition: u.rankAndPosition,
+          unitId: u.unitId,
+          unitName: u.unit,
+          unit: u.unit,
+          status: u.status
+        };
+        await onCreateUser(payload);
+        successCount++;
+      } catch (err) {
+        console.error('Lỗi thêm tài khoản:', u.email, err);
+        errorCount++;
+      }
+      setImportProgress(prev => ({ ...prev, current: i + 1 }));
+    }
+
+    setIsImportSaving(false);
+    setIsImportModalOpen(false);
+    setParsedUsers([]);
+
+    if (errorCount === 0 && duplicateCount === 0) {
+      setSuccessMessage(`Đã thêm thành công tất cả ${successCount} tài khoản quân nhân từ file Excel!`);
+    } else {
+      let msg = `Nhập dữ liệu hoàn tất. Thành công: ${successCount}`;
+      if (duplicateCount > 0) {
+        msg += `, Bỏ qua trùng lặp: ${duplicateCount} tài khoản`;
+      }
+      if (errorCount > 0) {
+        msg += `, Thất bại: ${errorCount} tài khoản`;
+      }
+      setSuccessMessage(msg);
+    }
+  };
+
+  const downloadExcelTemplate = () => {
+    const headers = [
+      'Họ và tên',
+      'Cấp bậc - Chức vụ',
+      'Ghi chú (STT)',
+      'Đơn vị công tác',
+      'Tên tài khoản (email)',
+      'Mật khẩu'
+    ];
+
+    const sampleData = [
+      ['Phạm Khắc Thành', 'Thượng tá - TBTH', '1', 'BTL Vùng 4', 'khacthanh@v4.hq', '123@abc'],
+      ['Phạm Tất Thắng', 'Thượng úy - TLTH', '2', 'Lữ đoàn 162', 'tatthang', '123@abc'],
+      ['Nguyễn Văn Hải', 'Đại úy - Chính trị viên', '3', 'Tàu 011', 'hainv@v4.hq', '123@abc']
+    ];
+
+    const ws_data = [headers, ...sampleData];
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+    ws['!cols'] = [
+      { wch: 25 }, // Họ và tên
+      { wch: 25 }, // Cấp bậc - Chức vụ
+      { wch: 15 }, // Ghi chú (STT)
+      { wch: 25 }, // Đơn vị công tác
+      { wch: 25 }, // Tên tài khoản
+      { wch: 15 }  // Mật khẩu
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Danh sach tai khoan');
+    XLSX.writeFile(wb, 'MAU_NHAP_TAI_KHOAN_NGUOI_DUNG.xlsx');
   };
 
   const renderRoleBadge = (role: string) => {
@@ -410,14 +686,39 @@ export const UsersView: React.FC<UsersViewProps> = ({
           </p>
         </div>
 
-        <button
-          id="btn-add-user"
-          onClick={handleOpenNew}
-          className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-medium text-xs shadow-xs transition-colors self-start sm:self-auto cursor-pointer"
-        >
-          <UserPlus className="w-4 h-4" />
-          <span>Thêm người dùng mới</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          {/* Download Template Button */}
+          <button
+            onClick={downloadExcelTemplate}
+            title="Tải file Excel mẫu chuẩn"
+            className="flex items-center space-x-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 px-3.5 py-2.5 rounded-xl font-medium text-xs border border-slate-200 transition-colors cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>Tải Excel mẫu</span>
+          </button>
+
+          {/* Import Excel Button */}
+          <label className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-medium text-xs shadow-xs transition-colors cursor-pointer">
+            <Upload className="w-4 h-4" />
+            <span>Nhập từ Excel</span>
+            <input
+              type="file"
+              accept=".xlsx, .xls"
+              onChange={handleExcelImport}
+              className="hidden"
+            />
+          </label>
+
+          {/* Create User Button */}
+          <button
+            id="btn-add-user"
+            onClick={handleOpenNew}
+            className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-medium text-xs shadow-xs transition-colors cursor-pointer"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Thêm người dùng mới</span>
+          </button>
+        </div>
       </div>
 
       {/* Overview Stat Cards */}
@@ -1009,6 +1310,13 @@ export const UsersView: React.FC<UsersViewProps> = ({
               </button>
             </div>
 
+            {formError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-xl flex items-start space-x-2 text-xs">
+                <XCircle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+                <span className="font-semibold">{formError}</span>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">
@@ -1020,7 +1328,10 @@ export const UsersView: React.FC<UsersViewProps> = ({
                   required
                   placeholder="Nguyễn Văn A"
                   value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, fullName: e.target.value });
+                    if (formError) setFormError(null);
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white font-semibold"
                 />
               </div>
@@ -1033,9 +1344,12 @@ export const UsersView: React.FC<UsersViewProps> = ({
                   id="form-user-email"
                   type="email"
                   required
-                  placeholder="email@vung4.vn"
+                  placeholder="email@v4.hq"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value });
+                    if (formError) setFormError(null);
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 focus:outline-hidden focus:border-blue-500 focus:bg-white font-mono"
                 />
               </div>
@@ -1208,6 +1522,203 @@ export const UsersView: React.FC<UsersViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Preview Excel Imported Accounts */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-6xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white font-bold flex items-center justify-center text-sm shadow-xs">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base">
+                    XEM TRƯỚC TÀI KHOẢN NHẬP TỪ EXCEL
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Hãy kiểm tra kỹ thông tin bên dưới. Bạn có thể chỉnh sửa trực tiếp trên từng ô nếu phát hiện sai sót trước khi lưu.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                disabled={isImportSaving}
+                onClick={() => {
+                  setParsedUsers([]);
+                  setIsImportModalOpen(false);
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body: Interactive Excel Table */}
+            <div className="p-6 overflow-y-auto flex-1 space-y-4 bg-slate-50/50">
+              <div className="flex items-center justify-between text-xs text-slate-500 font-semibold px-1">
+                <span>Danh sách phát hiện: {parsedUsers.length} tài khoản quân nhân</span>
+                <span className="text-emerald-600">Mật khẩu mặc định nếu trống: 123@abc</span>
+              </div>
+
+              <div className="border border-slate-200 rounded-xl bg-white shadow-xs overflow-hidden max-h-[50vh] overflow-y-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                      <th className="py-3 px-4 w-12 text-center">STT</th>
+                      <th className="py-3 px-4 w-1/4">Họ và tên</th>
+                      <th className="py-3 px-4 w-1/5">Cấp bậc - Chức vụ</th>
+                      <th className="py-3 px-4 w-1/4">Đơn vị công tác</th>
+                      <th className="py-3 px-4 w-1/4">Tên tài khoản (Email)</th>
+                      <th className="py-3 px-4 w-32">Mật khẩu</th>
+                      <th className="py-3 px-4 w-14 text-center">Xóa</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {parsedUsers.map((u, index) => {
+                      const isEmailInvalid = !u.email || !u.email.includes('@');
+                      // Live check duplicate with existing database users
+                      const isEmailDuplicate = users.some(existUser => (existUser.email || '').trim().toLowerCase() === (u.email || '').trim().toLowerCase());
+                      return (
+                        <tr key={u.id} className={`hover:bg-slate-50/70 transition-colors ${isEmailDuplicate ? 'bg-amber-50/20' : ''}`}>
+                          <td className="py-2 px-4 text-center text-slate-400 font-medium">{index + 1}</td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={u.fullName}
+                              disabled={isImportSaving}
+                              onChange={(e) => handleUpdateParsedUser(u.id, 'fullName', e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 transition-all font-semibold"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={u.rankAndPosition}
+                              disabled={isImportSaving}
+                              onChange={(e) => handleUpdateParsedUser(u.id, 'rankAndPosition', e.target.value)}
+                              placeholder="Cấp bậc - Chức vụ"
+                              className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 transition-all"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={u.unitId}
+                              disabled={isImportSaving}
+                              onChange={(e) => {
+                                const selectedUnit = units.find(unit => unit.id === e.target.value);
+                                if (selectedUnit) {
+                                  handleUpdateParsedUser(u.id, 'unitId', selectedUnit.id);
+                                  handleUpdateParsedUser(u.id, 'unit', selectedUnit.name);
+                                }
+                              }}
+                              className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 transition-all"
+                            >
+                              {units.map(unit => (
+                                <option key={unit.id} value={unit.id}>{unit.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 px-3">
+                            <div className="relative">
+                              <input
+                                type="text"
+                                value={u.email}
+                                disabled={isImportSaving}
+                                onChange={(e) => handleUpdateParsedUser(u.id, 'email', e.target.value)}
+                                className={`w-full bg-slate-50 border focus:bg-white focus:ring-1 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 transition-all font-mono ${
+                                  isEmailDuplicate
+                                    ? 'border-amber-400 bg-amber-50/40 text-amber-900 focus:border-amber-500 focus:ring-amber-500/20'
+                                    : isEmailInvalid 
+                                    ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500/20' 
+                                    : 'border-slate-200 focus:border-blue-500 focus:ring-blue-500/20'
+                                }`}
+                              />
+                              {isEmailDuplicate ? (
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] text-amber-700 font-extrabold bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded shadow-2xs">
+                                  Trùng tài khoản (Sẽ bỏ qua)
+                                </span>
+                              ) : isEmailInvalid ? (
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-rose-500 font-bold bg-rose-50 px-1 rounded">
+                                  Lỗi Email
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={u.password}
+                              disabled={isImportSaving}
+                              onChange={(e) => handleUpdateParsedUser(u.id, 'password', e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 transition-all font-mono"
+                            />
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <button
+                              disabled={isImportSaving}
+                              onClick={() => handleDeleteParsedUser(u.id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Footer with Saving Progress */}
+            <div className="p-5 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-50">
+              <div>
+                {isImportSaving ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center space-x-2 text-xs font-semibold text-blue-700">
+                      <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                      <span>Đang lưu dữ liệu tài khoản: {importProgress.current} / {importProgress.total}...</span>
+                    </div>
+                    <div className="w-64 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-blue-600 h-full transition-all duration-300" 
+                        style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 font-medium">
+                    Nhấp nút lưu để đồng bộ tất cả quân nhân vào cơ sở dữ liệu Cloud.
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2.5 shrink-0 self-end">
+                <button
+                  disabled={isImportSaving}
+                  onClick={() => {
+                    setParsedUsers([]);
+                    setIsImportModalOpen(false);
+                  }}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  disabled={isImportSaving || parsedUsers.length === 0}
+                  onClick={handleSaveAllImported}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center space-x-1.5"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Xác nhận thêm {parsedUsers.length} tài khoản</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
