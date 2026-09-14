@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   BookOpen, 
   Layers, 
@@ -11,7 +11,8 @@ import {
   ArrowRight,
   TrendingUp,
   FileCheck,
-  ShieldAlert
+  ShieldAlert,
+  Calendar
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import { DashboardStats, Course, Lesson, Unit, User, UserProgress, SystemNotification } from '../types';
@@ -63,27 +64,93 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const completedCount = safeProgress.filter(p => p.completed).length;
   const avgCompletionRate = safeProgress.length > 0 
     ? Math.round(safeProgress.reduce((acc, curr) => acc + (curr.overallProgress || 0), 0) / safeProgress.length)
-    : (stats?.averageCompletionRate || 89);
+    : (stats?.averageCompletionRate ?? 0);
 
   const statusPieData = [
-    { name: 'Đã phát hành', value: publishedLessons.length || 3, color: '#10B981' },
-    { name: 'Đang soạn thảo', value: draftLessons.length || 1, color: '#F59E0B' },
-    { name: 'Chờ thẩm định', value: reviewLessons.length || 1, color: '#6366F1' },
+    { name: 'Đã phát hành', value: publishedLessons.length, color: '#10B981' },
+    { name: 'Đang soạn thảo', value: draftLessons.length, color: '#F59E0B' },
+    { name: 'Chờ thẩm định', value: reviewLessons.length, color: '#6366F1' },
   ];
+  const totalLessonsInPie = publishedLessons.length + draftLessons.length + reviewLessons.length;
 
-  const unitChartData = safeUnits.length > 0
-    ? safeUnits.slice(0, 5).map(u => ({
+  // Collect dynamically available years from courses, progress, or current year
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    yearsSet.add(new Date().getFullYear()); // 2026
+
+    safeCourses.forEach((c) => {
+      if (c.year) {
+        const y = Number(c.year);
+        if (!isNaN(y) && y > 2000 && y < 2100) {
+          yearsSet.add(y);
+        }
+      } else if (c.createdAt) {
+        const y = new Date(c.createdAt).getFullYear();
+        if (!isNaN(y) && y > 2000 && y < 2100) yearsSet.add(y);
+      }
+    });
+
+    safeProgress.forEach((p) => {
+      if (p.lastAccessedAt) {
+        const y = new Date(p.lastAccessedAt).getFullYear();
+        if (!isNaN(y) && y > 2000 && y < 2100) yearsSet.add(y);
+      }
+    });
+
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [safeCourses, safeProgress]);
+
+  const [selectedYear, setSelectedYear] = useState<number | 'ALL'>(new Date().getFullYear());
+
+  // Real progress per military unit calculated strictly from real database for the selected year
+  const unitChartData = useMemo(() => {
+    if (safeUnits.length === 0) return [];
+
+    const courseIdsInYear = selectedYear === 'ALL'
+      ? null
+      : new Set(
+          safeCourses
+            .filter(c => Number(c.year) === selectedYear || (!c.year && new Date(c.createdAt || '').getFullYear() === selectedYear))
+            .map(c => c.id)
+        );
+
+    const yearProgress = selectedYear === 'ALL'
+      ? safeProgress
+      : safeProgress.filter(p => {
+          if (p.courseId && courseIdsInYear && courseIdsInYear.has(p.courseId)) return true;
+          if (p.lastAccessedAt && new Date(p.lastAccessedAt).getFullYear() === selectedYear) return true;
+          return false;
+        });
+
+    return safeUnits.map(u => {
+      // Find all users belonging to this unit
+      const unitUsers = safeUsers.filter(usr => {
+        if (usr.unitId && usr.unitId === u.id) return true;
+        if (usr.unit && (usr.unit === u.name || usr.unit === u.id)) return true;
+        return false;
+      });
+
+      // Find all progress records belonging to this unit or users in this unit
+      const unitProgress = yearProgress.filter(p => {
+        if (p.unitId && p.unitId === u.id) return true;
+        if (p.unitName && (p.unitName === u.name || p.unitName.includes(u.name) || u.name.includes(p.unitName))) return true;
+        if (unitUsers.some(usr => usr.id === p.userId)) return true;
+        return false;
+      });
+
+      let rate = 0;
+      if (unitProgress.length > 0) {
+        const totalProgress = unitProgress.reduce((sum, curr) => sum + (curr.overallProgress || 0), 0);
+        rate = Math.round(totalProgress / unitProgress.length);
+      }
+
+      return {
         name: u.name.split('(')[0].trim(),
-        rate: 85 + Math.floor(Math.random() * 12),
-        soldiers: u.memberCount || 500,
-      }))
-    : [
-        { name: 'Lữ đoàn 162', rate: 95, soldiers: 850 },
-        { name: 'Lữ đoàn 146 (Trường Sa)', rate: 88, soldiers: 1250 },
-        { name: 'Lữ đoàn 955', rate: 82, soldiers: 620 },
-        { name: 'Lữ đoàn 101', rate: 90, soldiers: 980 },
-        { name: 'TT Kỹ thuật 719', rate: 94, soldiers: 430 },
-      ];
+        rate,
+        soldiers: unitUsers.length || u.memberCount || 0,
+      };
+    });
+  }, [safeUnits, safeUsers, safeProgress, safeCourses, selectedYear]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -184,24 +251,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="text-xs text-slate-500 font-medium">Toàn Vùng 4</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
-            {completedCount || stats?.completedLearners || 1} chiến sĩ đạt chuẩn 100%
+            {completedCount} chiến sĩ đạt chuẩn 100%
           </div>
         </div>
 
-        {/* Card 4: Đơn vị tham gia */}
+        {/* Card 4: Cơ quan đơn vị */}
         <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm relative overflow-hidden group hover:border-indigo-400 transition-all">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Đơn vị & Điểm đảo</span>
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Cơ quan đơn vị</span>
             <div className="p-2.5 rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100">
               <Building2 className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-4 flex items-baseline justify-between">
-            <span className="text-3xl font-black text-slate-900">{safeUnits.length || stats?.totalUnits || 5}</span>
-            <span className="text-xs text-slate-500 font-medium">Lữ đoàn/Đảo</span>
+            <span className="text-3xl font-black text-slate-900">{safeUnits.length}</span>
+            <span className="text-xs text-slate-500 font-medium">Đơn vị</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
-            {safeUsers.length || stats?.totalUsers || 5} tài khoản cán bộ - học viên
+            {safeUsers.length} tài khoản người dùng
           </div>
         </div>
       </div>
@@ -218,24 +285,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">Tỷ lệ chiến sĩ hoàn thành bài học chính trị (%)</p>
             </div>
-            <span className="text-xs font-mono bg-slate-100 px-2.5 py-1 rounded text-slate-700 border border-slate-200">
-              Năm 2026
-            </span>
+            <div className="flex items-center space-x-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1 text-slate-700 transition-colors shadow-2xs">
+              <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <select
+                id="select-unit-progress-year"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                className="bg-transparent text-xs font-bold text-slate-700 focus:outline-hidden cursor-pointer pr-1"
+                title="Lựa chọn năm thống kê"
+              >
+                <option value="ALL">Tất cả các năm</option>
+                {availableYears.map((yr) => (
+                  <option key={yr} value={yr}>
+                    Năm {yr}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="h-64 min-h-[256px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={unitChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                <XAxis dataKey="name" stroke="#64748b" fontSize={11} interval={0} angle={-15} textAnchor="end" />
-                <YAxis stroke="#64748b" fontSize={11} domain={[0, 100]} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#FFF' }}
-                  formatter={(val: any) => [`${val}%`, 'Tỷ lệ hoàn thành']}
-                />
-                <Bar isAnimationActive={false} dataKey="rate" fill="#2563eb" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {unitChartData.length > 0 ? (
+            <div className="h-64 min-h-[256px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={unitChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                  <XAxis dataKey="name" stroke="#64748b" fontSize={11} interval={0} angle={-15} textAnchor="end" />
+                  <YAxis stroke="#64748b" fontSize={11} domain={[0, 100]} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#FFF' }}
+                    formatter={(val: any) => [`${val}%`, 'Tỷ lệ hoàn thành']}
+                  />
+                  <Bar isAnimationActive={false} dataKey="rate" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="h-64 min-h-[256px] w-full flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+              <Building2 className="w-8 h-8 mb-2 text-slate-300" />
+              <span className="text-xs font-semibold text-slate-500">Chưa có dữ liệu đơn vị</span>
+              <span className="text-[11px] text-slate-400 mt-0.5">Tiến độ sẽ được tự động tổng hợp khi có dữ liệu đơn vị và học viên học tập</span>
+            </div>
+          )}
         </div>
 
         {/* Right 1 Col: Lesson Status Pie */}
@@ -248,27 +337,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="h-44 min-h-[176px] w-full my-auto flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={statusPieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={45}
-                  outerRadius={65}
-                  paddingAngle={5}
-                  dataKey="value"
-                  isAnimationActive={false}
-                >
-                  {statusPieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#FFF' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {totalLessonsInPie > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={statusPieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={45}
+                    outerRadius={65}
+                    paddingAngle={5}
+                    dataKey="value"
+                    isAnimationActive={false}
+                  >
+                    {statusPieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#FFF' }}
+                    formatter={(val: any) => [`${val} bài`, 'Số lượng']}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-center py-6 flex flex-col items-center justify-center">
+                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mb-2 text-slate-400">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <p className="text-xs font-semibold text-slate-600">0 bài học</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Hệ thống chưa có bài học nào</p>
+              </div>
+            )}
           </div>
 
           <div className="space-y-1.5 pt-3 border-t border-slate-100 text-xs">
@@ -302,42 +402,50 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="space-y-3">
-            {safeLessons.slice(0, 3).map((lesson) => (
-              <div
-                key={lesson.id}
-                onClick={() => selectLesson(lesson)}
-                className="bg-slate-50 hover:bg-blue-50/50 border border-slate-200 hover:border-blue-300 p-3.5 rounded-2xl cursor-pointer transition-all flex items-center justify-between group"
-              >
-                <div className="flex items-center space-x-3 min-w-0">
-                  <div className="w-12 h-12 rounded-xl bg-slate-200 overflow-hidden shrink-0 border border-slate-200">
-                    <img src={lesson.thumbnail} alt={lesson.title} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200">
-                        v{lesson.version}
-                      </span>
-                      <span className="text-[10px] text-slate-500 truncate">{lesson.courseTitle}</span>
-                    </div>
-                    <h4 className="text-xs font-bold text-slate-900 group-hover:text-blue-600 truncate mt-0.5">
-                      {lesson.title}
-                    </h4>
-                  </div>
-                </div>
-
-                <div className="shrink-0 flex items-center space-x-2 pl-3">
-                  <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      lesson.status === 'PUBLISHED'
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : 'bg-amber-50 text-amber-700 border border-amber-200'
-                    }`}
-                  >
-                    {lesson.status === 'PUBLISHED' ? 'Đã phát hành' : 'Bản nháp'}
-                  </span>
-                </div>
+            {safeLessons.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                <BookOpen className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                <p className="text-xs font-semibold text-slate-500">Chưa có bài học nào trong hệ thống</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Tạo chuyên đề và bài học mới để phát hành lên ứng dụng</p>
               </div>
-            ))}
+            ) : (
+              safeLessons.slice(0, 3).map((lesson) => (
+                <div
+                  key={lesson.id}
+                  onClick={() => selectLesson(lesson)}
+                  className="bg-slate-50 hover:bg-blue-50/50 border border-slate-200 hover:border-blue-300 p-3.5 rounded-2xl cursor-pointer transition-all flex items-center justify-between group"
+                >
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="w-12 h-12 rounded-xl bg-slate-200 overflow-hidden shrink-0 border border-slate-200">
+                      <img src={lesson.thumbnail} alt={lesson.title} className="w-full h-full object-cover" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200">
+                          v{lesson.version}
+                        </span>
+                        <span className="text-[10px] text-slate-500 truncate">{lesson.courseTitle}</span>
+                      </div>
+                      <h4 className="text-xs font-bold text-slate-900 group-hover:text-blue-600 truncate mt-0.5">
+                        {lesson.title}
+                      </h4>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex items-center space-x-2 pl-3">
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        lesson.status === 'PUBLISHED'
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-amber-50 text-amber-700 border border-amber-200'
+                      }`}
+                    >
+                      {lesson.status === 'PUBLISHED' ? 'Đã phát hành' : 'Bản nháp'}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -355,16 +463,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div className="space-y-3">
-            {(stats?.recentActivities || []).map((act) => (
-              <div key={act.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-800">
-                  <span>{act.action}</span>
-                  <span className="text-slate-400 font-mono text-[10px]">{act.time}</span>
-                </div>
-                <div className="text-slate-600 mt-1 line-clamp-1">{act.target}</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">Thực hiện: {act.user}</div>
+            {(!stats?.recentActivities || stats.recentActivities.length === 0) ? (
+              <div className="text-center py-8 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                <Clock className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                <p className="text-xs font-semibold text-slate-500">Chưa có nhật ký hoạt động mới</p>
               </div>
-            ))}
+            ) : (
+              stats.recentActivities.map((act) => (
+                <div key={act.id} className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-800">
+                    <span>{act.action}</span>
+                    <span className="text-slate-400 font-mono text-[10px]">{act.time}</span>
+                  </div>
+                  <div className="text-slate-600 mt-1 line-clamp-1">{act.target}</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Thực hiện: {act.user}</div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

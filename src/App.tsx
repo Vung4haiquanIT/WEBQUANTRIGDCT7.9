@@ -143,9 +143,7 @@ export function App() {
 
       // Realtime listener for learning progress from mobile app and web
       const unsubProgress = api.listenProgress((progs) => {
-        if (progs && progs.length > 0) {
-          setProgressList(progs);
-        }
+        setProgressList(progs || []);
       });
 
       return () => {
