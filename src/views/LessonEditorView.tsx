@@ -10,7 +10,6 @@ import {
   Plus, 
   Trash2, 
   Upload, 
-  Sliders, 
   Sparkles, 
   CheckCircle, 
   AlertTriangle, 
@@ -1849,70 +1848,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
           >
             <Eye className="w-4 h-4" />
             <span>Mô phỏng giao diện chiến sĩ</span>
-          </button>
-        </div>
-      </div>
-
-
-
-      {/* Module Visibility Toggle Ribbon */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center space-x-2">
-          <Sliders className="w-4 h-4 text-blue-600 shrink-0" />
-          <div>
-            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
-              Bật / Tắt thành phần nội dung
-            </span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button
-            onClick={() => handleToggleModule('showSlides')}
-            className={`px-3 py-1.5 rounded-xl font-semibold border transition-all flex items-center space-x-1.5 ${
-              currentLesson.moduleConfig.showSlides
-                ? 'bg-blue-50 text-blue-700 border-blue-300 shadow-xs'
-                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Slide bài giảng ({slides.length})</span>
-          </button>
-
-          <button
-            onClick={() => handleToggleModule('showContents')}
-            className={`px-3 py-1.5 rounded-xl font-semibold border transition-all flex items-center space-x-1.5 ${
-              currentLesson.moduleConfig.showContents
-                ? 'bg-blue-50 text-blue-700 border-blue-300 shadow-xs'
-                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Nội dung bài học ({items.length > 0 ? items.length : contents.length})</span>
-          </button>
-
-          <button
-            onClick={() => handleToggleModule('showVideos')}
-            className={`px-3 py-1.5 rounded-xl font-semibold border transition-all flex items-center space-x-1.5 ${
-              currentLesson.moduleConfig.showVideos
-                ? 'bg-blue-50 text-blue-700 border-blue-300 shadow-xs'
-                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
-            }`}
-          >
-            <Video className="w-3.5 h-3.5" />
-            <span>Video tư liệu ({videos.length})</span>
-          </button>
-
-          <button
-            onClick={() => handleToggleModule('showAudios')}
-            className={`px-3 py-1.5 rounded-xl font-semibold border transition-all flex items-center space-x-1.5 ${
-              currentLesson.moduleConfig.showAudios
-                ? 'bg-blue-50 text-blue-700 border-blue-300 shadow-xs'
-                : 'bg-slate-100 text-slate-400 border-slate-200 line-through'
-            }`}
-          >
-            <Headphones className="w-3.5 h-3.5" />
-            <span>Audio bài giảng ({audios.length})</span>
           </button>
         </div>
       </div>

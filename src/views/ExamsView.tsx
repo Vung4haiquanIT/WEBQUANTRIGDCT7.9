@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  FileSpreadsheet, Plus, Upload, Play, CheckCircle2, XCircle, Clock, 
+  FileSpreadsheet, Plus, Upload, Play, CheckCircle2, XCircle, Clock, Calendar,
   Award, ShieldCheck, Download, Trash2, Eye, RefreshCw, Search, Filter,
   Users, Layers, ArrowRight, AlertCircle, FileText, Check, X, Smartphone, BarChart3,
   Edit3, TrendingUp, Medal, ChevronRight
@@ -157,17 +157,116 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     }
   };
 
+  // Helper: format ISO / timestamp to YYYY-MM-DD for date input
+  const formatForDateInput = (dateInput?: string | Date | number): string => {
+    if (!dateInput) return '';
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  // Helper: convert YYYY-MM-DD to ISO at start of day (00:00:00.000)
+  const convertDateToStartOfDayIso = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (y && m && d) {
+      const date = new Date(y, m - 1, d, 0, 0, 0, 0);
+      return date.toISOString();
+    }
+    return '';
+  };
+
+  // Helper: convert YYYY-MM-DD to ISO at end of day (23:59:59.999)
+  const convertDateToEndOfDayIso = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (y && m && d) {
+      const date = new Date(y, m - 1, d, 23, 59, 59, 999);
+      return date.toISOString();
+    }
+    return '';
+  };
+
+  // Helper: format for display (ngày DD/MM/YYYY)
+  const formatDateDisplay = (dateInput?: string | Date | number): string => {
+    if (!dateInput) return '';
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return String(dateInput);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  };
+
+  // Helper: compute auto status based on startTime & endTime vs currentTime
+  const getExamSessionStatus = (
+    startTime?: string,
+    endTime?: string,
+    explicitStatus?: string
+  ): {
+    status: 'UPCOMING' | 'ACTIVE' | 'COMPLETED';
+    label: string;
+    badgeClass: string;
+    dotClass: string;
+  } => {
+    if (explicitStatus === 'COMPLETED') {
+      return {
+        status: 'COMPLETED',
+        label: 'Đã kết thúc',
+        badgeClass: 'text-slate-600 bg-slate-100 border-slate-200',
+        dotClass: 'bg-slate-400'
+      };
+    }
+
+    const now = Date.now();
+    const sTime = startTime ? new Date(startTime).getTime() : null;
+    const eTime = endTime ? new Date(endTime).getTime() : null;
+
+    if (sTime && !isNaN(sTime) && now < sTime) {
+      return {
+        status: 'UPCOMING',
+        label: 'Sắp diễn ra',
+        badgeClass: 'text-amber-800 bg-amber-50 border-amber-300',
+        dotClass: 'bg-amber-500'
+      };
+    }
+
+    if (eTime && !isNaN(eTime) && now > eTime) {
+      return {
+        status: 'COMPLETED',
+        label: 'Đã kết thúc',
+        badgeClass: 'text-slate-600 bg-slate-100 border-slate-200',
+        dotClass: 'bg-slate-400'
+      };
+    }
+
+    return {
+      status: 'ACTIVE',
+      label: 'Đang diễn ra',
+      badgeClass: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+      dotClass: 'bg-emerald-600 animate-pulse'
+    };
+  };
+
   // Helper to open session modal pre-selected from a Question Bank
   const handleCreateSessionFromBank = (bank: ExamBank) => {
+    const today = new Date();
+    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const startIso = convertDateToStartOfDayIso(formatForDateInput(today));
+    const endIso = convertDateToEndOfDayIso(formatForDateInput(nextWeek));
+
     setEditingSession(null);
     setSessionFormData({
       title: `Đợt kiểm tra: ${bank.title}`,
       description: `Kiểm tra đánh giá chất lượng từ bộ đề ${bank.title} (${bank.totalQuestions} câu hỏi)`,
+      targetGroup: 'ALL',
       bankId: bank.id,
       durationMinutes: 20,
       passScore: 5.0,
-      totalQuestions: bank.totalQuestions || 20,
+      totalQuestions: 20,
+      maxAttempts: 3,
       targetUnit: 'ALL',
+      startTime: startIso,
+      endTime: endIso,
       status: 'ACTIVE'
     });
     setIsNewSessionModalOpen(true);
@@ -177,13 +276,16 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   const [sessionFormData, setSessionFormData] = useState({
     title: '',
     description: '',
+    targetGroup: 'ALL' as 'ALL' | 'SQ' | 'QNCN' | string,
     bankId: '',
     durationMinutes: 20,
     passScore: 5.0,
     totalQuestions: 20,
-    maxAttempts: 1,
+    maxAttempts: 3,
     targetUnit: 'ALL',
-    status: 'ACTIVE' as 'ACTIVE' | 'COMPLETED' | 'DRAFT'
+    startTime: '',
+    endTime: '',
+    status: 'ACTIVE' as 'ACTIVE' | 'COMPLETED' | 'DRAFT' | 'UPCOMING' | string
   });
 
   // Fetch initial data & setup realtime sync listeners
@@ -215,6 +317,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   const loadAllData = async () => {
     setIsLoading(true);
     try {
+      await api.cleanSampleSubmissionsIfNeeded().catch(() => {});
       const [banksData, sessionsData, subsData] = await Promise.all([
         api.getExamBanks(),
         api.getExamSessions(),
@@ -303,16 +406,24 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
   // Open Session Modal for Creation
   const handleOpenCreateSession = () => {
+    const today = new Date();
+    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const startIso = convertDateToStartOfDayIso(formatForDateInput(today));
+    const endIso = convertDateToEndOfDayIso(formatForDateInput(nextWeek));
+
     setEditingSession(null);
     setSessionFormData({
       title: '',
       description: '',
-      bankId: '',
+      targetGroup: 'ALL',
+      bankId: banks.length > 0 ? banks[0].id : '',
       durationMinutes: 20,
       passScore: 5.0,
       totalQuestions: 20,
-      maxAttempts: 1,
+      maxAttempts: 3,
       targetUnit: 'ALL',
+      startTime: startIso,
+      endTime: endIso,
       status: 'ACTIVE'
     });
     setIsNewSessionModalOpen(true);
@@ -321,15 +432,31 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   // Open Session Modal for Editing
   const handleOpenEditSession = (session: ExamSession) => {
     setEditingSession(session);
+    const today = new Date();
+    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const defaultStartIso = convertDateToStartOfDayIso(formatForDateInput(today));
+    const defaultEndIso = convertDateToEndOfDayIso(formatForDateInput(nextWeek));
+
+    const sTime = session.startTime || session.createdAt || defaultStartIso;
+    let eTime = session.endTime || defaultEndIso;
+    const sDateStr = formatForDateInput(sTime);
+    const eDateStr = formatForDateInput(eTime);
+    if (sDateStr && eDateStr && eDateStr < sDateStr) {
+      eTime = convertDateToEndOfDayIso(sDateStr);
+    }
+
     setSessionFormData({
       title: session.title || '',
       description: session.description || '',
+      targetGroup: session.targetGroup || 'ALL',
       bankId: session.bankId || '',
       durationMinutes: session.durationMinutes || 20,
       passScore: session.passScore || 5.0,
       totalQuestions: session.totalQuestions || 20,
-      maxAttempts: session.maxAttempts !== undefined ? session.maxAttempts : 1,
+      maxAttempts: session.maxAttempts !== undefined ? session.maxAttempts : 3,
       targetUnit: session.targetUnit || 'ALL',
+      startTime: sTime,
+      endTime: eTime,
       status: session.status || 'ACTIVE'
     });
     setIsNewSessionModalOpen(true);
@@ -361,42 +488,62 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       const requestedCount = Number(sessionFormData.totalQuestions) || 20;
       const pool = bankQuestions.length > 0 ? bankQuestions : (editingSession?.questions || []);
       const selectedQuestions = api.pickRandomQuestions(pool, requestedCount);
+      
+      const startIso = sessionFormData.startTime
+        ? (sessionFormData.startTime.includes('T') ? sessionFormData.startTime : convertDateToStartOfDayIso(sessionFormData.startTime))
+        : convertDateToStartOfDayIso(formatForDateInput(new Date()));
+      const endIso = sessionFormData.endTime
+        ? (sessionFormData.endTime.includes('T') ? sessionFormData.endTime : convertDateToEndOfDayIso(sessionFormData.endTime))
+        : convertDateToEndOfDayIso(formatForDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+
+      if (startIso && endIso && new Date(endIso).getTime() < new Date(startIso).getTime()) {
+        alert('Lỗi: Ngày kết thúc không thể trước ngày bắt đầu. Vui lòng chọn lại ngày kết thúc!');
+        return;
+      }
+
+      const computedAuto = getExamSessionStatus(startIso, endIso);
 
       if (editingSession) {
         const updated = await api.updateExamSession(editingSession.id, {
           title: sessionFormData.title.trim(),
           description: sessionFormData.description.trim(),
+          targetGroup: sessionFormData.targetGroup || 'ALL',
           bankId: sessionFormData.bankId,
           bankTitle: selectedBank?.title || editingSession.bankTitle || 'Bộ đề kiểm tra',
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
           totalQuestions: selectedQuestions.length,
-          maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 1,
+          maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 3,
           questions: selectedQuestions,
-          targetUnit: sessionFormData.targetUnit,
-          status: sessionFormData.status,
+          targetUnit: 'ALL',
+          startTime: startIso,
+          endTime: endIso,
+          status: computedAuto.status,
         });
 
         setSessions(prev => prev.map(s => s.id === editingSession.id ? updated : s));
-        alert(`Đã lưu thay đổi đợt kiểm tra "${updated.title}"! Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
+        alert(`Đã lưu thay đổi đợt kiểm tra "${updated.title}"! Trạng thái: ${computedAuto.label}. Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       } else {
         const created = await api.createExamSession({
           title: sessionFormData.title.trim(),
           description: sessionFormData.description.trim(),
+          targetGroup: sessionFormData.targetGroup || 'ALL',
           bankId: sessionFormData.bankId,
           bankTitle: selectedBank?.title || 'Bộ đề kiểm tra',
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
           totalQuestions: selectedQuestions.length,
-          maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 1,
+          maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 3,
           questions: selectedQuestions,
-          targetUnit: sessionFormData.targetUnit,
-          status: sessionFormData.status,
+          targetUnit: 'ALL',
+          startTime: startIso,
+          endTime: endIso,
+          status: computedAuto.status,
           createdBy: currentUser?.name || 'Phòng Chính trị Vùng 4'
         });
 
         setSessions(prev => [created, ...prev.filter(s => s.id !== created.id)]);
-        alert(`Đã khởi tạo đợt kiểm tra mới "${created.title}"! Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
+        alert(`Đã khởi tạo đợt kiểm tra mới "${created.title}"! Trạng thái: ${computedAuto.label}. Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       }
 
       setIsNewSessionModalOpen(false);
@@ -404,12 +551,15 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       setSessionFormData({
         title: '',
         description: '',
+        targetGroup: 'ALL',
         bankId: '',
         durationMinutes: 20,
         passScore: 5.0,
         totalQuestions: 20,
-        maxAttempts: 1,
+        maxAttempts: 3,
         targetUnit: 'ALL',
+        startTime: '',
+        endTime: '',
         status: 'ACTIVE'
       });
       await loadAllData();
@@ -421,9 +571,25 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
   // Handle Toggle Session Status
   const handleToggleSessionStatus = async (session: ExamSession) => {
-    const newStatus = session.status === 'ACTIVE' ? 'COMPLETED' : 'ACTIVE';
+    const currentStatusInfo = getExamSessionStatus(session.startTime, session.endTime);
+    const now = new Date();
     try {
-      await api.updateExamSession(session.id, { status: newStatus });
+      if (currentStatusInfo.status === 'ACTIVE') {
+        await api.updateExamSession(session.id, { 
+          endTime: now.toISOString(),
+          status: 'COMPLETED' 
+        });
+      } else {
+        const today = new Date();
+        const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const startIso = convertDateToStartOfDayIso(formatForDateInput(today));
+        const endIso = convertDateToEndOfDayIso(formatForDateInput(nextWeek));
+        await api.updateExamSession(session.id, { 
+          startTime: startIso,
+          endTime: endIso,
+          status: 'ACTIVE' 
+        });
+      }
       loadAllData();
     } catch (err: any) {
       alert(`Lỗi cập nhật trạng thái đợt kiểm tra: ${err.message}`);
@@ -544,7 +710,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     return () => clearInterval(timer);
   }, [activeSimulatorSession, testResultSummary]);
 
-  // Execute Submit Test in Simulator
+  // Execute Submit Test in Simulator (Thử sức trên App - Không lưu CSDL chính thức, không tính vào báo cáo)
   const handleExecuteSubmitTest = async () => {
     if (!activeSimulatorSession || simulatorQuestions.length === 0) return;
 
@@ -570,7 +736,8 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     const passed = score >= (activeSimulatorSession.passScore || 5.0);
     const timeSpent = (activeSimulatorSession.durationMinutes * 60) - timeLeftSeconds;
 
-    const submissionPayload: Partial<ExamSubmission> = {
+    const simulatedResult: ExamSubmission = {
+      id: `sim-temp-${Date.now()}`,
       sessionId: activeSimulatorSession.id,
       sessionTitle: activeSimulatorSession.title,
       userId: currentUser?.id || `user-sim-${Date.now()}`,
@@ -583,18 +750,14 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       totalQuestions: totalQ,
       passed,
       timeSpentSeconds: timeSpent > 0 ? timeSpent : 1,
-      answers: answerRecords
+      answers: answerRecords,
+      submittedAt: new Date().toISOString()
     };
 
-    try {
-      const result = await api.submitExamResult(submissionPayload);
-      setTestResultSummary(result);
-      loadAllData();
-    } catch (err: any) {
-      alert(`Lỗi nộp bài thi: ${err.message}`);
-    } finally {
-      setIsSubmittingTest(false);
-    }
+    // Chế độ "Thử sức trên App" là trải nghiệm thử giao diện cho quản trị viên/cán bộ.
+    // Hoàn toàn KHÔNG ghi nhận vào CSDL đợt thi chính thức và KHÔNG tính vào báo cáo kết quả tổng hợp.
+    setTestResultSummary(simulatedResult);
+    setIsSubmittingTest(false);
   };
 
   // Filtered submissions for Report view
@@ -647,7 +810,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       const totalLessons = userProgress.length;
       const completedLessons = userProgress.filter(p => p.completed).length;
       const avgProgress = totalLessons > 0 
-        ? Math.round(userProgress.reduce((sum, p) => sum + (p.overallProgress || 0), 0) / totalLessons)
+        ? Number((userProgress.reduce((sum, p) => sum + (p.overallProgress || 0), 0) / totalLessons).toFixed(2))
         : 0;
 
       // Real submissions matching selected filters
@@ -810,7 +973,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       .map(u => {
         const avgScoreNum = u.total > 0 ? u.sumScore / u.total : 0;
         const avgScore = avgScoreNum.toFixed(1);
-        const passRate = u.total > 0 ? Math.round((u.passed / u.total) * 100) : 0;
+        const passRate = u.total > 0 ? Number(((u.passed / u.total) * 100).toFixed(2)) : 0;
         let rankLabel = 'CẦN ÔN LUYỆN';
         let rankColor = 'bg-rose-50 text-rose-700 border-rose-200';
         if (u.total === 0) {
@@ -854,7 +1017,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       'Email': d.user.email || '',
       'Số bài đang học': d.totalLessons,
       'Số bài hoàn thành': d.completedLessons,
-      'Tiến độ học tập TB (%)': `${d.avgProgress}%`,
+      'Tiến độ học tập TB (%)': `${Number(d.avgProgress).toFixed(2)}%`,
       'Số lượt thi': d.examCount,
       'Điểm số cao nhất': d.highestScore,
       'Số lần ĐẠT': d.passedCount,
@@ -892,14 +1055,14 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       'Tổng quân nhân dự thi': u.total,
       'Số quân nhân ĐẠT': u.passed,
       'Số quân nhân CHƯA ĐẠT': u.failed,
-      'Tỷ lệ ĐẠT (%)': `${u.passRate}%`,
+      'Tỷ lệ ĐẠT (%)': `${Number(u.passRate).toFixed(2)}%`,
       'Điểm trung bình': u.avgScore,
       'Điểm cao nhất': u.maxScore,
       'Điểm thấp nhất': u.minScoreDisplay,
-      'Giỏi/Xuất sắc (8-10đ)': `${u.excellentCount} (${u.total > 0 ? Math.round((u.excellentCount/u.total)*100) : 0}%)`,
-      'Khá (6.5-7.9đ)': `${u.goodCount} (${u.total > 0 ? Math.round((u.goodCount/u.total)*100) : 0}%)`,
-      'Trung bình (5-6.4đ)': `${u.averageCount} (${u.total > 0 ? Math.round((u.averageCount/u.total)*100) : 0}%)`,
-      'Yếu (<5đ)': `${u.poorCount} (${u.total > 0 ? Math.round((u.poorCount/u.total)*100) : 0}%)`,
+      'Giỏi/Xuất sắc (8-10đ)': `${u.excellentCount} (${u.total > 0 ? ((u.excellentCount / u.total) * 100).toFixed(2) : '0.00'}%)`,
+      'Khá (6.5-7.9đ)': `${u.goodCount} (${u.total > 0 ? ((u.goodCount / u.total) * 100).toFixed(2) : '0.00'}%)`,
+      'Trung bình (5-6.4đ)': `${u.averageCount} (${u.total > 0 ? ((u.averageCount / u.total) * 100).toFixed(2) : '0.00'}%)`,
+      'Yếu (<5đ)': `${u.poorCount} (${u.total > 0 ? ((u.poorCount / u.total) * 100).toFixed(2) : '0.00'}%)`,
       'Xếp loại Thi đua Đơn vị': u.rankLabel
     }));
 
@@ -941,7 +1104,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   // Calculate stats for filtered submissions
   const totalSubmissionsCount = useMemo(() => unitStatsList.reduce((acc, curr) => acc + curr.total, 0), [unitStatsList]);
   const passedCount = useMemo(() => unitStatsList.reduce((acc, curr) => acc + curr.passed, 0), [unitStatsList]);
-  const passRatePercent = useMemo(() => totalSubmissionsCount > 0 ? Math.round((passedCount / totalSubmissionsCount) * 100) : 0, [totalSubmissionsCount, passedCount]);
+  const passRatePercent = useMemo(() => totalSubmissionsCount > 0 ? Number(((passedCount / totalSubmissionsCount) * 100).toFixed(2)) : 0, [totalSubmissionsCount, passedCount]);
   const avgScore = useMemo(() => {
     const totalSum = unitStatsList.reduce((acc, curr) => acc + curr.sumScore, 0);
     return totalSubmissionsCount > 0 ? (totalSum / totalSubmissionsCount).toFixed(1) : '0.0';
@@ -1052,9 +1215,10 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
               {sessions.map((session) => {
                 const sessionSubs = submissions.filter(s => s.sessionId === session.id);
                 const passSubsCount = sessionSubs.filter(s => s.passed).length;
-                const rate = sessionSubs.length > 0 ? Math.round((passSubsCount / sessionSubs.length) * 100) : 0;
+                const rate = sessionSubs.length > 0 ? Number(((passSubsCount / sessionSubs.length) * 100).toFixed(2)) : 0;
                 const linkedBank = banks.find(b => b.id === session.bankId);
                 const displayTotalQuestions = session.totalQuestions || linkedBank?.totalQuestions || linkedBank?.questions?.length || 20;
+                const sessionStatusInfo = getExamSessionStatus(session.startTime, session.endTime);
 
                 return (
                   <div
@@ -1064,27 +1228,19 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-2">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                            session.status === 'ACTIVE'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 animate-pulse'
-                              : session.status === 'COMPLETED'
-                              ? 'bg-slate-100 text-slate-700 border border-slate-200'
-                              : 'bg-amber-50 text-amber-700 border border-amber-200'
-                          }`}
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${sessionStatusInfo.badgeClass}`}
                         >
-                          <span className={`w-1.5 h-1.5 rounded-full ${session.status === 'ACTIVE' ? 'bg-emerald-600' : 'bg-slate-400'}`} />
-                          <span>
-                            {session.status === 'ACTIVE'
-                              ? 'ĐANG DIỄN RA (TRÊN APP)'
-                              : session.status === 'COMPLETED'
-                              ? 'ĐÃ KẾT THÚC'
-                              : 'BẢN NHÁP'}
+                          <span className={`w-1.5 h-1.5 rounded-full ${sessionStatusInfo.dotClass}`} />
+                          <span className="uppercase tracking-wider">
+                            {sessionStatusInfo.label}
                           </span>
                         </span>
 
-                        <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                          Đơn vị: {session.targetUnit === 'ALL' ? 'Toàn Vùng' : session.targetUnit}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-bold">
+                            Đối tượng: {session.targetGroup === 'SQ' ? 'Sĩ quan (SQ)' : session.targetGroup === 'QNCN' ? 'QNCN' : 'Tất cả'}
+                          </span>
+                        </div>
                       </div>
 
                       <h3 className="text-base font-bold text-slate-900 hover:text-blue-600 transition-colors">
@@ -1096,18 +1252,39 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                         </p>
                       )}
 
-                      {/* App Push Status Indicator */}
-                      {session.questions && session.questions.length > 0 ? (
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200/80 mt-2.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span>Đã đồng bộ {session.questions.length} câu hỏi lên App ({new Date(session.pushedToAppAt || session.updatedAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })})</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200/80 mt-2.5">
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Tự động đồng bộ câu hỏi từ Bộ đề lên App khi tạo/chỉnh sửa đợt</span>
+                      {/* Thời gian diễn ra đợt thi */}
+                      {(session.startTime || session.endTime) && (
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-700 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/90 mt-2.5">
+                          <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span>
+                            Thời gian:{' '}
+                            <strong className="text-slate-900 font-bold">
+                              {session.startTime ? `Từ ${formatDateDisplay(session.startTime)}` : 'Bắt đầu ngay'}
+                            </strong>
+                            {' '}đến{' '}
+                            <strong className="text-slate-900 font-bold">
+                              {session.endTime ? formatDateDisplay(session.endTime) : 'Không giới hạn'}
+                            </strong>
+                          </span>
                         </div>
                       )}
+
+                      {/* Thời gian tạo đợt thi */}
+                      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-800 bg-emerald-50/90 px-3 py-1.5 rounded-xl border border-emerald-200/80 mt-2">
+                        <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>
+                          Thời gian tạo:{' '}
+                          <strong className="text-emerald-900 font-bold">
+                            {(() => {
+                              const timeVal = session.createdAt || session.startTime || session.pushedToAppAt || session.updatedAt;
+                              if (!timeVal) return 'Đang cập nhật';
+                              const d = new Date(timeVal);
+                              if (isNaN(d.getTime())) return timeVal;
+                              return `${d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })} ngày ${d.toLocaleDateString('vi-VN')}`;
+                            })()}
+                          </strong>
+                        </span>
+                      </div>
 
                       <div className="grid grid-cols-4 gap-1.5 mt-3 pt-3 border-t border-slate-100 text-center text-xs">
                         <div className="bg-slate-50 rounded-xl p-1.5 border border-slate-200/60">
@@ -1140,24 +1317,14 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     {/* Controls Footer */}
                     <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        {isAttemptsExhausted(session) ? (
-                          <button
-                            onClick={() => handleStartTestSimulator(session)}
-                            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-500 text-xs font-bold shadow-sm transition-all"
-                            title="Đồng chí đã hoàn thành số lượt thi cho đợt kiểm tra này"
-                          >
-                            <Smartphone className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Đã thi xong (Hết lượt)</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleStartTestSimulator(session)}
-                            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all"
-                          >
-                            <Smartphone className="w-3.5 h-3.5" />
-                            <span>Thử sức trên App</span>
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleStartTestSimulator(session)}
+                          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm transition-all"
+                          title="Trải nghiệm làm bài thi thử nghiệm trên App (Không tính vào báo cáo tổng hợp)"
+                        >
+                          <Smartphone className="w-3.5 h-3.5" />
+                          <span>Thử sức trên App</span>
+                        </button>
 
                         <button
                           onClick={() => {
@@ -1168,7 +1335,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                           className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition-all"
                         >
                           <BarChart3 className="w-3.5 h-3.5" />
-                          <span>Bảng điểm ({rate}% Đạt)</span>
+                          <span>Bảng điểm ({Number(rate).toFixed(2)}% Đạt)</span>
                         </button>
                       </div>
 
@@ -1184,10 +1351,10 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
                         <button
                           onClick={() => handleToggleSessionStatus(session)}
-                          title={session.status === 'ACTIVE' ? 'Kết thúc đợt kiểm tra' : 'Mở lại đợt kiểm tra'}
+                          title={sessionStatusInfo.status === 'ACTIVE' ? 'Kết thúc đợt kiểm tra ngay' : 'Mở lại đợt kiểm tra'}
                           className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition-colors"
                         >
-                          {session.status === 'ACTIVE' ? 'Khóa đợt' : 'Mở đợt'}
+                          {sessionStatusInfo.status === 'ACTIVE' ? 'Khóa đợt' : 'Mở đợt'}
                         </button>
 
                         <button
@@ -1355,7 +1522,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
               </div>
               <div>
                 <span className="block text-[11px] font-bold text-slate-500 uppercase">Tỷ lệ Đạt yêu cầu</span>
-                <span className="text-xl font-black text-indigo-700">{passRatePercent}%</span>
+                <span className="text-xl font-black text-indigo-700">{Number(passRatePercent).toFixed(2)}%</span>
               </div>
             </div>
 
@@ -1526,7 +1693,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                           </td>
                           <td className="p-3.5 text-center">
                             <div className="flex items-center justify-center space-x-1.5">
-                              <span className="font-mono font-black text-blue-800">{unitStat.passRate}%</span>
+                              <span className="font-mono font-black text-blue-800">{Number(unitStat.passRate).toFixed(2)}%</span>
                               <div className="w-12 bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
                                 <div
                                   className={`h-full ${unitStat.passRate >= 80 ? 'bg-emerald-500' : unitStat.passRate >= 50 ? 'bg-blue-500' : 'bg-rose-500'}`}
@@ -1731,7 +1898,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                                   style={{ width: `${d.avgProgress}%` }}
                                 />
                               </div>
-                              <span className="font-mono font-black text-slate-700 text-[11px]">{d.avgProgress}%</span>
+                              <span className="font-mono font-black text-slate-700 text-[11px]">{Number(d.avgProgress).toFixed(2)}%</span>
                             </div>
                           </td>
                           <td className="p-3.5 text-center font-mono font-bold text-blue-700 text-sm">
@@ -1969,17 +2136,31 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
               </div>
 
               <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  Chọn đối tượng tham gia <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={sessionFormData.targetGroup}
+                  onChange={(e) => setSessionFormData({ ...sessionFormData, targetGroup: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-bold cursor-pointer"
+                >
+                  <option value="ALL">Tất cả (Sĩ quan & QNCN)</option>
+                  <option value="SQ">Sĩ quan (SQ)</option>
+                  <option value="QNCN">Quân nhân chuyên nghiệp (QNCN)</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-slate-700 font-bold mb-1">Chọn Bộ Đề Thi (từ File Excel đã nhập) *</label>
                 <select
                   required
                   value={sessionFormData.bankId}
                   onChange={(e) => {
                     const selectedId = e.target.value;
-                    const b = banks.find(item => item.id === selectedId);
                     setSessionFormData({
                       ...sessionFormData,
-                      bankId: selectedId,
-                      totalQuestions: b ? b.totalQuestions : sessionFormData.totalQuestions
+                      bankId: selectedId
                     });
                   }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-bold"
@@ -2001,7 +2182,14 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     min="1"
                     required
                     value={sessionFormData.totalQuestions}
-                    onChange={(e) => setSessionFormData({ ...sessionFormData, totalQuestions: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSessionFormData({
+                        ...sessionFormData,
+                        totalQuestions: val === '' ? ('' as any) : Number(val)
+                      });
+                    }}
+                    placeholder="20"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono font-bold text-center"
                   />
                 </div>
@@ -2037,40 +2225,105 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     min="0"
                     value={sessionFormData.maxAttempts}
                     onChange={(e) => setSessionFormData({ ...sessionFormData, maxAttempts: Number(e.target.value) })}
-                    placeholder="0: Không hạn chế"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono text-center"
+                    placeholder="Ví dụ: 3"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-mono text-center font-bold text-blue-700"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Đơn vị tham gia</label>
-                  <select
-                    value={sessionFormData.targetUnit}
-                    onChange={(e) => setSessionFormData({ ...sessionFormData, targetUnit: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                  >
-                    <option value="ALL">Toàn Vùng 4</option>
-                    {units.map((u) => (
-                      <option key={u.id} value={u.name}>{u.name}</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Khung chọn Ngày bắt đầu & Ngày kết thúc (Chỉ chọn ngày, mặc định 00h00 đến 23h59) */}
+              {(() => {
+                const startDateStr = formatForDateInput(sessionFormData.startTime);
+                const endDateStr = formatForDateInput(sessionFormData.endTime);
+                const isDateOrderInvalid = Boolean(startDateStr && endDateStr && endDateStr < startDateStr);
 
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Trạng thái khởi tạo</label>
-                  <select
-                    value={sessionFormData.status}
-                    onChange={(e) => setSessionFormData({ ...sessionFormData, status: e.target.value as any })}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-bold"
-                  >
-                    <option value="ACTIVE">Đang diễn ra (Hiển thị lên App)</option>
-                    <option value="DRAFT">Bản nháp</option>
-                    <option value="COMPLETED">Đã kết thúc</option>
-                  </select>
-                </div>
-              </div>
+                return (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1">
+                          Ngày bắt đầu <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={startDateStr}
+                          onChange={(e) => {
+                            const newDateStr = e.target.value;
+                            const startVal = newDateStr ? convertDateToStartOfDayIso(newDateStr) : '';
+                            setSessionFormData({ 
+                              ...sessionFormData, 
+                              startTime: startVal
+                            });
+                          }}
+                          className={`w-full bg-slate-50 border rounded-xl p-2.5 text-slate-900 focus:outline-none focus:bg-white font-semibold text-sm ${
+                            isDateOrderInvalid ? 'border-red-400 focus:border-red-500' : 'border-slate-200 focus:border-blue-500'
+                          }`}
+                        />
+                        <span className="text-[11px] text-slate-400 mt-1 block">Mặc định tính từ 00h00</span>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-700 font-bold mb-1">
+                          Ngày kết thúc <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={endDateStr}
+                          onChange={(e) => {
+                            const newEndDateStr = e.target.value;
+                            const endVal = newEndDateStr ? convertDateToEndOfDayIso(newEndDateStr) : '';
+                            setSessionFormData({ 
+                              ...sessionFormData, 
+                              endTime: endVal 
+                            });
+                          }}
+                          className={`w-full bg-slate-50 border rounded-xl p-2.5 text-slate-900 focus:outline-none focus:bg-white font-semibold text-sm ${
+                            isDateOrderInvalid ? 'border-red-400 focus:border-red-500 bg-red-50/20' : 'border-slate-200 focus:border-blue-500'
+                          }`}
+                        />
+                        <span className="text-[11px] text-slate-400 mt-1 block">Mặc định kết thúc lúc 23h59</span>
+                      </div>
+                    </div>
+
+                    {/* Cảnh báo nếu ngày kết thúc trước ngày bắt đầu */}
+                    {isDateOrderInvalid && (
+                      <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                        <span>
+                          Lỗi: Ngày kết thúc ({formatDateDisplay(endDateStr)}) không được trước ngày bắt đầu ({formatDateDisplay(startDateStr)}). Vui lòng điều chỉnh lại để lưu!
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Dòng trạng thái hiển thị riêng biệt bên dưới, không có chữ tự động */}
+              {(() => {
+                const startDateStr = formatForDateInput(sessionFormData.startTime);
+                const endDateStr = formatForDateInput(sessionFormData.endTime);
+                const isDateOrderInvalid = Boolean(startDateStr && endDateStr && endDateStr < startDateStr);
+                const modalStatus = getExamSessionStatus(sessionFormData.startTime, sessionFormData.endTime);
+
+                return (
+                  <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-200">
+                    <span className="text-xs font-bold text-slate-700">Trạng thái</span>
+                    {isDateOrderInvalid ? (
+                      <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border text-red-700 bg-red-50 border-red-200">
+                        <span className="w-2 h-2 rounded-full bg-red-500" />
+                        <span>Thời gian không hợp lệ</span>
+                      </span>
+                    ) : (
+                      <span className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold border ${modalStatus.badgeClass}`}>
+                        <span className={`w-2 h-2 rounded-full ${modalStatus.dotClass}`} />
+                        <span>{modalStatus.label}</span>
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
                 {editingSession ? (
@@ -2100,12 +2353,20 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                   >
                     Hủy
                   </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md"
-                  >
-                    {editingSession ? 'Lưu Thay Đổi' : 'Tạo Đợt Thi'}
-                  </button>
+                  {(() => {
+                    const s = formatForDateInput(sessionFormData.startTime);
+                    const e = formatForDateInput(sessionFormData.endTime);
+                    const isInvalid = Boolean(s && e && e < s);
+                    return (
+                      <button
+                        type="submit"
+                        disabled={isInvalid}
+                        className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed disabled:shadow-none text-white font-bold shadow-md transition-colors"
+                      >
+                        {editingSession ? 'Lưu Thay Đổi' : 'Tạo Đợt Thi'}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </form>
@@ -2322,12 +2583,12 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center justify-between shrink-0">
               <div>
                 <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">
-                  MOBILE APP TEST SIMULATOR
+                  CHẾ ĐỘ THỬ SỨC TRÊN APP (DÀNH CHO CÁN BỘ / QUẢN TRỊ)
                 </span>
                 <h3 className="text-sm font-bold text-white mt-1">{activeSimulatorSession.title}</h3>
               </div>
 
-              {!testResultSummary && !isAttemptsExhausted(activeSimulatorSession) && (
+              {!testResultSummary && (
                 <div className="flex items-center space-x-2 bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-xl font-mono text-sm font-bold">
                   <Clock className="w-4 h-4 animate-spin" />
                   <span>
@@ -2339,51 +2600,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             </div>
 
             {/* Test Content OR Summary */}
-            {isAttemptsExhausted(activeSimulatorSession) ? (
-              <div className="p-12 text-center space-y-6 overflow-y-auto flex-1 flex flex-col items-center justify-center">
-                <div className="w-20 h-20 rounded-full bg-slate-800 border-2 border-amber-500 text-amber-400 flex items-center justify-center shadow-lg animate-bounce">
-                  <Smartphone className="w-10 h-10" />
-                </div>
-                
-                <div className="max-w-md mx-auto space-y-3">
-                  <h2 className="text-xl font-black text-amber-400 uppercase tracking-wide">ĐỒNG CHÍ ĐÃ HOÀN THÀNH ĐỢT THI</h2>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Hệ thống ghi nhận quân nhân <strong>{currentUser?.name || currentUser?.fullName || 'quân nhân'}</strong> đã thực hiện hết số lượt thi cho phép của đợt kiểm tra này.
-                  </p>
-                  
-                  <div className="bg-slate-800 border border-slate-700 rounded-2xl p-4 space-y-2 mt-4 text-xs">
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">Số lượt thi tối đa:</span>
-                      <span className="font-bold text-amber-400 font-mono">{activeSimulatorSession.maxAttempts} lượt</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">Số lượt thi đã hoàn thành:</span>
-                      <span className="font-bold text-slate-200 font-mono">{getUserAttemptsForSession(activeSimulatorSession)} / {activeSimulatorSession.maxAttempts} lượt</span>
-                    </div>
-                    <div className="flex justify-between items-center border-t border-slate-700/60 pt-2 mt-1">
-                      <span className="text-slate-400">Kết quả cao nhất:</span>
-                      <span className="font-bold text-emerald-400 font-mono">
-                        {(() => {
-                          const uId = currentUser?.id;
-                          const uDoc = users.find(u => u.id === uId);
-                          if (uDoc && (uDoc as any).lastExamScore !== undefined) {
-                            return `${(uDoc as any).lastExamScore}/${(uDoc as any).lastExamTotal || 10}đ (${(uDoc as any).lastExamPassed !== false ? 'Đạt' : 'Chưa đạt'})`;
-                          }
-                          return 'Đã ghi nhận';
-                        })()}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setActiveSimulatorSession(null)}
-                  className="px-8 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 font-bold text-xs text-white shadow-md transition-all mt-4"
-                >
-                  Đóng Trình Giả Lập App
-                </button>
-              </div>
-            ) : testResultSummary ? (
+            {testResultSummary ? (
               <div className="p-8 text-center space-y-6 overflow-y-auto flex-1">
                 <div className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center border-2 ${
                   testResultSummary.passed ? 'bg-emerald-950 border-emerald-500 text-emerald-400' : 'bg-rose-950 border-rose-500 text-rose-400'
@@ -2393,8 +2610,8 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
                 <div>
                   <h2 className="text-2xl font-black">{testResultSummary.passed ? 'XIN CHÚC MỪNG! BẠN ĐÃ ĐẠT' : 'KẾT QUẢ: CHƯA ĐẠT'}</h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Kết quả đã được ghi nhận trực tiếp về Web Quản trị GDCT Vùng 4 Hải Quân
+                  <p className="text-xs text-amber-400 font-medium mt-1">
+                    * Kết quả làm bài trong chế độ Thử sức trên App không lưu vào CSDL và không tính vào Báo cáo kết quả tổng hợp của đơn vị.
                   </p>
                 </div>
 
@@ -2408,7 +2625,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     <span className="text-lg font-bold text-amber-400">{testResultSummary.score} / 10</span>
                   </div>
                   <div>
-                    <span className="block text-slate-400">Thời gian</span>
+                    <span className="block text-slate-400">Thời gian làm thử</span>
                     <span className="text-lg font-bold text-blue-400">{Math.floor(testResultSummary.timeSpentSeconds / 60)} phút</span>
                   </div>
                 </div>

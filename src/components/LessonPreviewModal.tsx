@@ -668,7 +668,7 @@ export const LessonPreviewModal: React.FC<LessonPreviewModalProps> = ({
                               <span>Tiến độ Slide bài giảng:</span>
                             </div>
                             <span className="text-[11px] font-bold text-blue-700 font-mono bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                              Slide {currentSlideIndex + 1}/{slides.length} ({localProgress.slideProgress}%)
+                              Slide {currentSlideIndex + 1}/{slides.length} ({Number(localProgress.slideProgress || 0).toFixed(2)}%)
                             </span>
                           </div>
 
@@ -772,9 +772,10 @@ export const LessonPreviewModal: React.FC<LessonPreviewModalProps> = ({
                         </div>
                         <span className="text-[11px] font-bold text-blue-700 font-mono bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                           {(Object.values(itemProgressMap) as UserItemProgress[]).filter(p => p.completed).length} / {items.length || contents.length} hoàn thành ({
-                            items.length > 0 
-                              ? Math.round(((Object.values(itemProgressMap) as UserItemProgress[]).filter(p => p.completed).length / items.length) * 100)
-                              : localProgress.contentProgress
+                            (items.length > 0 
+                              ? (((Object.values(itemProgressMap) as UserItemProgress[]).filter(p => p.completed).length / items.length) * 100)
+                              : Number(localProgress.contentProgress || 0)
+                            ).toFixed(2)
                           }%)
                         </span>
                       </div>

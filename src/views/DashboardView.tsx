@@ -14,9 +14,10 @@ import {
   ShieldAlert,
   Calendar
 } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, LabelList } from 'recharts';
 import { DashboardStats, Course, Lesson, Unit, User, UserProgress, SystemNotification } from '../types';
 import { DongSonDrum, DongSonBorder } from '../components/DongSonMotif';
+import { removeVietnameseTones } from '../utils/vietnamese';
 
 interface DashboardViewProps {
   stats?: DashboardStats | null;
@@ -61,10 +62,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const draftLessons = safeLessons.filter(l => l.status === 'DRAFT');
   const reviewLessons = safeLessons.filter(l => l.status === 'REVIEW');
 
-  const completedCount = safeProgress.filter(p => p.completed).length;
-  const avgCompletionRate = safeProgress.length > 0 
-    ? Math.round(safeProgress.reduce((acc, curr) => acc + (curr.overallProgress || 0), 0) / safeProgress.length)
-    : (stats?.averageCompletionRate ?? 0);
+  const isLessonMarkedCompleted = (p: UserProgress) => {
+    return Boolean(
+      p.completed === true || 
+      (p as any).isCompleted === true || 
+      (p as any).hoanThanh === true || 
+      (p as any).daDat === true
+    );
+  };
+
+  const renderCustomBarLabel = (props: any) => {
+    const { x, y, width, height, value } = props;
+    if (value === undefined || value === null) return null;
+    const num = Number(value);
+    const isInside = height >= 24;
+    const textY = isInside ? y + 15 : y - 6;
+    const textColor = isInside ? '#FFFFFF' : '#334155';
+
+    return (
+      <text
+        x={x + width / 2}
+        y={textY}
+        fill={textColor}
+        textAnchor="middle"
+        fontSize={11}
+        fontWeight="700"
+      >
+        {num.toFixed(2)}%
+      </text>
+    );
+  };
+
+  const completedRecords = safeProgress.filter(p => isLessonMarkedCompleted(p));
+  const completedCount = completedRecords.length;
+  const uniqueCompletedUsersCount = new Set(completedRecords.map(p => p.userId || p.userName)).size;
 
   const statusPieData = [
     { name: 'Đã phát hành', value: publishedLessons.length, color: '#10B981' },
@@ -102,7 +133,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const [selectedYear, setSelectedYear] = useState<number | 'ALL'>(new Date().getFullYear());
 
-  // Real progress per military unit calculated strictly from real database for the selected year
+  // Thống kê tiến độ theo đơn vị:
+  // - Nếu trên app bài học được đánh dấu hoàn thành thì mới thống kê lên
+  // - Thống kê theo tỉ lệ: (số bài học hoàn thành) / (tổng số bài) của mỗi quân nhân
+  // - Được tính trung bình trong đơn vị đó
+  // - Hiển thị tỉ lệ % trực tiếp trong cột biểu đồ
   const unitChartData = useMemo(() => {
     if (safeUnits.length === 0) return [];
 
@@ -114,43 +149,247 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             .map(c => c.id)
         );
 
+    // Xác định các bài học hợp lệ trong phạm vi năm (hoặc tất cả bài học)
+    const validLessons = selectedYear === 'ALL'
+      ? safeLessons.filter(l => !l.isDeleted && l.status !== 'DRAFT')
+      : safeLessons.filter(l => {
+          if (l.isDeleted) return false;
+          if (l.status === 'DRAFT') return false;
+          if (l.year && Number(l.year) === selectedYear) return true;
+          if (l.courseYear && Number(l.courseYear) === selectedYear) return true;
+          if (l.courseId && courseIdsInYear && courseIdsInYear.has(l.courseId)) return true;
+          if (l.createdAt && new Date(l.createdAt).getFullYear() === selectedYear) return true;
+          return false;
+        });
+
+    const validLessonIds = new Set(validLessons.map(l => l.id));
+
+    // Tổng số bài học
+    const totalLessons = validLessons.length > 0
+      ? validLessons.length
+      : (publishedLessons.length || safeLessons.filter(l => !l.isDeleted).length || 1);
+
     const yearProgress = selectedYear === 'ALL'
       ? safeProgress
       : safeProgress.filter(p => {
           if (p.courseId && courseIdsInYear && courseIdsInYear.has(p.courseId)) return true;
+          if (p.lessonId && validLessonIds.has(p.lessonId)) return true;
           if (p.lastAccessedAt && new Date(p.lastAccessedAt).getFullYear() === selectedYear) return true;
           return false;
         });
 
     return safeUnits.map(u => {
-      // Find all users belonging to this unit
+      const normUnitName = removeVietnameseTones(u.name || '');
+      const normUnitCode = removeVietnameseTones(u.code || '');
+
+      // 1. Tìm các quân nhân đã đăng ký thuộc đơn vị
       const unitUsers = safeUsers.filter(usr => {
-        if (usr.unitId && usr.unitId === u.id) return true;
-        if (usr.unit && (usr.unit === u.name || usr.unit === u.id)) return true;
+        if (usr.unitId && (usr.unitId === u.id || usr.unitId === u.code)) return true;
+        if (usr.unitName && (usr.unitName === u.name || usr.unitName === u.code)) return true;
+        if (usr.unit && (usr.unit === u.name || usr.unit === u.id || usr.unit === u.code)) return true;
+        const normUserUnit = removeVietnameseTones(usr.unitName || usr.unit || '');
+        if (normUserUnit && normUnitName) {
+          if (normUserUnit === normUnitName || normUserUnit.includes(normUnitName) || normUnitName.includes(normUserUnit)) return true;
+        }
+        if (normUserUnit && normUnitCode && normUserUnit === normUnitCode) return true;
         return false;
       });
 
-      // Find all progress records belonging to this unit or users in this unit
+      const unitUserIds = new Set(unitUsers.map(usr => usr.id));
+
+      // 2. Tìm tất cả bản ghi tiến độ thuộc về đơn vị này
       const unitProgress = yearProgress.filter(p => {
-        if (p.unitId && p.unitId === u.id) return true;
-        if (p.unitName && (p.unitName === u.name || p.unitName.includes(u.name) || u.name.includes(p.unitName))) return true;
-        if (unitUsers.some(usr => usr.id === p.userId)) return true;
+        if (p.userId && unitUserIds.has(p.userId)) return true;
+        if (p.unitId && (p.unitId === u.id || p.unitId === u.code)) return true;
+        if (p.unitName && (p.unitName === u.name || p.unitName === u.code)) return true;
+        const normPUnit = removeVietnameseTones(p.unitName || (p as any).donVi || '');
+        if (normPUnit && normUnitName) {
+          if (normPUnit === normUnitName || normPUnit.includes(normUnitName) || normUnitName.includes(normPUnit)) return true;
+        }
         return false;
       });
 
+      // 3. Danh sách các quân nhân trong đơn vị
+      const soldiersMap = new Map<string, { id: string; name: string; completedLessons: Set<string> }>();
+
+      unitUsers.forEach(usr => {
+        const soldierId = usr.id || usr.email || usr.name;
+        if (!soldiersMap.has(soldierId)) {
+          soldiersMap.set(soldierId, {
+            id: soldierId,
+            name: usr.fullName || usr.name || 'Quân nhân',
+            completedLessons: new Set<string>(),
+          });
+        }
+      });
+
+      unitProgress.forEach(p => {
+        const soldierId = p.userId || p.userName;
+        if (soldierId && !soldiersMap.has(soldierId)) {
+          soldiersMap.set(soldierId, {
+            id: soldierId,
+            name: p.userName || 'Quân nhân',
+            completedLessons: new Set<string>(),
+          });
+        }
+      });
+
+      // 4. Ghi nhận bài học hoàn thành: CHỈ KHI TRÊN APP ĐƯỢC ĐÁNH DẤU HOÀN THÀNH
+      unitProgress.forEach(p => {
+        if (isLessonMarkedCompleted(p)) {
+          const soldierId = p.userId || p.userName;
+          if (soldierId && soldiersMap.has(soldierId)) {
+            const lessonKey = p.lessonId || p.lessonTitle || p.id;
+            const belongsToYear = selectedYear === 'ALL' || !validLessonIds.size || validLessonIds.has(p.lessonId) || (courseIdsInYear && p.courseId && courseIdsInYear.has(p.courseId));
+            if (belongsToYear && lessonKey) {
+              soldiersMap.get(soldierId)!.completedLessons.add(lessonKey);
+            }
+          }
+        }
+      });
+
+      // 5. Thống kê theo tỉ lệ = (số bài hoàn thành) / (tổng số bài) của mỗi quân nhân
+      // và được tính trung bình trong đơn vị đó
       let rate = 0;
-      if (unitProgress.length > 0) {
-        const totalProgress = unitProgress.reduce((sum, curr) => sum + (curr.overallProgress || 0), 0);
-        rate = Math.round(totalProgress / unitProgress.length);
+      let totalCompletedLessonsInUnit = 0;
+      const soldierCount = soldiersMap.size;
+
+      if (soldierCount > 0) {
+        let totalSoldierRatios = 0;
+        soldiersMap.forEach(soldier => {
+          const count = soldier.completedLessons.size;
+          totalCompletedLessonsInUnit += count;
+          const ratio = Math.min(1, count / totalLessons);
+          totalSoldierRatios += ratio;
+        });
+        rate = Number(((totalSoldierRatios / soldierCount) * 100).toFixed(2));
       }
 
       return {
         name: u.name.split('(')[0].trim(),
+        fullName: u.name,
         rate,
-        soldiers: unitUsers.length || u.memberCount || 0,
+        totalLessons,
+        completedLessonsCount: totalCompletedLessonsInUnit,
+        soldiers: soldierCount || unitUsers.length || u.memberCount || 0,
       };
     });
-  }, [safeUnits, safeUsers, safeProgress, safeCourses, selectedYear]);
+  }, [safeUnits, safeUsers, safeProgress, safeCourses, safeLessons, publishedLessons, selectedYear]);
+
+  // Thống kê tỉ lệ hoàn thành toàn Vùng (Toàn Vùng 4):
+  // - Chỉ tính các bài học được đánh dấu hoàn thành trên ứng dụng
+  // - Tỷ lệ của mỗi quân nhân = (Số bài hoàn thành / Tổng số bài học)
+  // - Tỷ lệ toàn Vùng = Trung bình cộng tỷ lệ hoàn thành của các quân nhân toàn Vùng (%)
+  const regionProgressStats = useMemo(() => {
+    const courseIdsInYear = selectedYear === 'ALL'
+      ? null
+      : new Set(
+          safeCourses
+            .filter(c => Number(c.year) === selectedYear || (!c.year && new Date(c.createdAt || '').getFullYear() === selectedYear))
+            .map(c => c.id)
+        );
+
+    // Xác định các bài học hợp lệ trong phạm vi năm (hoặc tất cả bài học)
+    const validLessons = selectedYear === 'ALL'
+      ? safeLessons.filter(l => !l.isDeleted && l.status !== 'DRAFT')
+      : safeLessons.filter(l => {
+          if (l.isDeleted) return false;
+          if (l.status === 'DRAFT') return false;
+          if (l.year && Number(l.year) === selectedYear) return true;
+          if (l.courseYear && Number(l.courseYear) === selectedYear) return true;
+          if (l.courseId && courseIdsInYear && courseIdsInYear.has(l.courseId)) return true;
+          if (l.createdAt && new Date(l.createdAt).getFullYear() === selectedYear) return true;
+          return false;
+        });
+
+    const validLessonIds = new Set(validLessons.map(l => l.id));
+
+    // Tổng số bài học cần hoàn thành
+    const totalLessons = validLessons.length > 0
+      ? validLessons.length
+      : (publishedLessons.length || safeLessons.filter(l => !l.isDeleted).length || 1);
+
+    const yearProgress = selectedYear === 'ALL'
+      ? safeProgress
+      : safeProgress.filter(p => {
+          if (p.courseId && courseIdsInYear && courseIdsInYear.has(p.courseId)) return true;
+          if (p.lessonId && validLessonIds.has(p.lessonId)) return true;
+          if (p.lastAccessedAt && new Date(p.lastAccessedAt).getFullYear() === selectedYear) return true;
+          return false;
+        });
+
+    // 1. Tập hợp danh sách quân nhân trong toàn Vùng 4
+    const soldiersMap = new Map<string, { id: string; name: string; unit: string; completedLessons: Set<string> }>();
+
+    safeUsers.forEach(usr => {
+      const soldierId = usr.id || usr.email || usr.name;
+      if (soldierId && !soldiersMap.has(soldierId)) {
+        soldiersMap.set(soldierId, {
+          id: soldierId,
+          name: usr.fullName || usr.name || 'Quân nhân',
+          unit: usr.unitName || usr.unit || '',
+          completedLessons: new Set<string>(),
+        });
+      }
+    });
+
+    yearProgress.forEach(p => {
+      const soldierId = p.userId || p.userName;
+      if (soldierId && !soldiersMap.has(soldierId)) {
+        soldiersMap.set(soldierId, {
+          id: soldierId,
+          name: p.userName || 'Quân nhân',
+          unit: p.unitName || (p as any).donVi || '',
+          completedLessons: new Set<string>(),
+        });
+      }
+    });
+
+    // 2. Ghi nhận bài học hoàn thành khi và chỉ khi trên app được đánh dấu hoàn thành
+    yearProgress.forEach(p => {
+      if (isLessonMarkedCompleted(p)) {
+        const soldierId = p.userId || p.userName;
+        if (soldierId && soldiersMap.has(soldierId)) {
+          const lessonKey = p.lessonId || p.lessonTitle || p.id;
+          const belongsToYear = selectedYear === 'ALL' || !validLessonIds.size || validLessonIds.has(p.lessonId) || (courseIdsInYear && p.courseId && courseIdsInYear.has(p.courseId));
+          if (belongsToYear && lessonKey) {
+            soldiersMap.get(soldierId)!.completedLessons.add(lessonKey);
+          }
+        }
+      }
+    });
+
+    const totalSoldiers = soldiersMap.size || (safeUsers.length || 1);
+    let totalCompletedLessonsCount = 0;
+    let soldiersWithAnyCompletion = 0;
+    let soldiersCompletedAll = 0;
+    let totalSoldierRatios = 0;
+
+    soldiersMap.forEach(soldier => {
+      const count = soldier.completedLessons.size;
+      totalCompletedLessonsCount += count;
+      if (count > 0) soldiersWithAnyCompletion += 1;
+      if (count >= totalLessons) soldiersCompletedAll += 1;
+      totalSoldierRatios += Math.min(1, count / totalLessons);
+    });
+
+    // Tỉ lệ hoàn thành toàn Vùng (%): trung bình cộng tỉ lệ hoàn thành của các quân nhân
+    const rate = totalSoldiers > 0
+      ? Number(((totalSoldierRatios / totalSoldiers) * 100).toFixed(2))
+      : 0;
+
+    const totalExpectedCompletions = totalSoldiers * totalLessons;
+
+    return {
+      rate,
+      totalSoldiers,
+      totalLessons,
+      totalCompletedLessonsCount,
+      soldiersWithAnyCompletion,
+      soldiersCompletedAll,
+      totalExpectedCompletions,
+    };
+  }, [safeCourses, safeLessons, publishedLessons, safeUsers, safeProgress, selectedYear]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -237,7 +476,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Card 3: Tỷ lệ hoàn thành */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm relative overflow-hidden group hover:border-amber-400 transition-all">
+        <div 
+          className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm relative overflow-hidden group hover:border-amber-400 transition-all"
+          title="Tỷ lệ hoàn thành Toàn Vùng = Trung bình tỷ lệ hoàn thành (Số bài hoàn thành / Tổng số bài) của các quân nhân toàn Vùng 4"
+        >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Tỷ lệ hoàn thành</span>
             <div className="p-2.5 rounded-xl bg-amber-50 text-amber-600 border border-amber-100">
@@ -246,12 +488,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="mt-4 flex items-baseline justify-between">
             <span className="text-3xl font-black text-amber-600">
-              {avgCompletionRate}%
+              {Number(regionProgressStats.rate).toFixed(2)}%
             </span>
             <span className="text-xs text-slate-500 font-medium">Toàn Vùng 4</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
-            {completedCount} chiến sĩ đạt chuẩn 100%
+            {regionProgressStats.soldiersWithAnyCompletion} chiến sĩ đạt chuẩn ({regionProgressStats.totalCompletedLessonsCount}/{regionProgressStats.totalExpectedCompletions} lượt bài học)
           </div>
         </div>
 
@@ -283,7 +525,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <FileCheck className="w-4 h-4 text-blue-600" />
                 <span>Tiến độ học tập theo Đơn vị (Vùng 4 Hải Quân)</span>
               </h3>
-              <p className="text-xs text-slate-500 mt-0.5">Tỷ lệ chiến sĩ hoàn thành bài học chính trị (%)</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Tỷ lệ hoàn thành = (Số bài hoàn thành / Tổng số bài) của mỗi quân nhân, tính trung bình theo đơn vị (%)
+              </p>
             </div>
             <div className="flex items-center space-x-1.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1 text-slate-700 transition-colors shadow-2xs">
               <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
@@ -307,14 +551,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {unitChartData.length > 0 ? (
             <div className="h-64 min-h-[256px] w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={unitChartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                <BarChart data={unitChartData} margin={{ top: 20, right: 10, left: -20, bottom: 25 }}>
                   <XAxis dataKey="name" stroke="#64748b" fontSize={11} interval={0} angle={-15} textAnchor="end" />
-                  <YAxis stroke="#64748b" fontSize={11} domain={[0, 100]} />
+                  <YAxis stroke="#64748b" fontSize={11} domain={[0, 105]} ticks={[0, 25, 50, 75, 100]} />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '12px', color: '#FFF' }}
-                    formatter={(val: any) => [`${val}%`, 'Tỷ lệ hoàn thành']}
+                    formatter={(val: any, _name: any, item: any) => [
+                      `${Number(val).toFixed(2)}% (TB hoàn thành trên tổng ${item?.payload?.totalLessons || 0} bài học - ${item?.payload?.soldiers || 0} quân nhân)`,
+                      'Tỷ lệ hoàn thành'
+                    ]}
                   />
-                  <Bar isAnimationActive={false} dataKey="rate" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                  <Bar isAnimationActive={false} dataKey="rate" fill="#2563eb" radius={[6, 6, 0, 0]}>
+                    <LabelList
+                      dataKey="rate"
+                      content={renderCustomBarLabel}
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>

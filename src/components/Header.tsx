@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Radio, 
-  Search, 
   CheckCircle2, 
   RefreshCw,
   User as UserIcon,
@@ -103,19 +102,6 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls */}
       <div className="flex items-center space-x-3">
-        {/* Search Bar */}
-        <div className="relative hidden md:block w-60">
-          <input
-            id="global-search-input"
-            type="text"
-            placeholder="Tìm bài học, chuyên đề..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-800/80 border border-slate-600/70 text-white placeholder-slate-400 text-xs rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
-          />
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-        </div>
-
         {/* Refresh Button */}
         <button
           id="header-refresh-btn"

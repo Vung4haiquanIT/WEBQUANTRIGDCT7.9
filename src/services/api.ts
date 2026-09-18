@@ -146,11 +146,17 @@ export const api = {
       ...lesson,
       id: newLessonId,
       title: `${lesson.title} (Bản sao)`,
+      year: lesson.year,
+      courseYear: lesson.courseYear || lesson.year,
       version: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
     return await firestoreService.createLesson(newLesson);
+  },
+
+  syncAllLessonsYear: async (): Promise<{ updatedCount: number; totalLessons: number }> => {
+    return await firestoreService.syncAllLessonsYear();
   },
 
   updateModuleConfig: async (lessonId: string, moduleConfig: LessonModuleConfig): Promise<Lesson> => {
@@ -954,25 +960,52 @@ export const api = {
     if (firestoreRole === 'ADMIN') firestoreRole = 'SUPER_ADMIN';
     if (firestoreRole === 'APPROVER') firestoreRole = 'CONTENT_ADMIN';
 
+    const isInactive = data.status === 'INACTIVE' || data.isLocked === true;
+    const realPassword = (data.password || '123@abc').replace(/^__LOCKED__/, '');
+
     const user: any = {
       id,
       name: displayName,
       fullName: displayName,
       email: data.email || 'quan.nhan@v4.hq',
-      password: data.password || '123@abc',
+      password: isInactive ? `__LOCKED__${realPassword}` : realPassword,
+      originalPassword: realPassword,
       role: firestoreRole,
+      targetGroup: data.targetGroup || (data.rank?.includes('CN') ? 'QNCN' : 'SQ'),
+      doiTuong: data.doiTuong || data.targetGroup || (data.rank?.includes('CN') ? 'QNCN' : 'SQ'),
       rank: data.rank || 'Đại úy',
       position: data.position || 'Trợ lý',
       rankAndPosition: rankAndPos,
       unitId: data.unitId || 'unit-1',
       unitName: unitName,
       unit: unitName,
-      status: data.status || 'ACTIVE',
+      status: isInactive ? 'INACTIVE' : 'ACTIVE',
+      isLocked: isInactive,
+      locked: isInactive,
+      isActive: !isInactive,
+      active: !isInactive,
+      disabled: isInactive,
+      isBlocked: isInactive,
+      blocked: isInactive,
+      accountStatus: isInactive ? 'LOCKED' : 'ACTIVE',
+      lockStatus: isInactive ? 'LOCKED' : 'ACTIVE',
+      appStatus: isInactive ? 'LOCKED' : 'ACTIVE',
+      state: isInactive ? 'LOCKED' : 'ACTIVE',
+      canLogin: !isInactive,
+      loginAllowed: !isInactive,
       createdAt: now,
       updatedAt: now
     };
     await setDoc(docRef, user);
-    return { ...user, role: data.role || 'USER' };
+    return { 
+      ...user, 
+      role: data.role || 'USER',
+      password: realPassword,
+      originalPassword: realPassword,
+      isLocked: isInactive,
+      isActive: !isInactive,
+      status: isInactive ? 'INACTIVE' : 'ACTIVE'
+    };
   },
 
   updateUser: async (id: string, data: Partial<User>): Promise<User> => {
@@ -1344,6 +1377,10 @@ export const api = {
 
   getExamSubmissions: async (sessionId?: string): Promise<ExamSubmission[]> => {
     return await firestoreService.getExamSubmissions(sessionId);
+  },
+
+  cleanSampleSubmissionsIfNeeded: async (): Promise<void> => {
+    return await firestoreService.cleanSampleSubmissionsIfNeeded();
   },
 
   submitExamResult: async (submission: Partial<ExamSubmission>): Promise<ExamSubmission> => {

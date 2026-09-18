@@ -325,14 +325,6 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
 
           <div className="flex items-center space-x-2 shrink-0">
             <button
-              onClick={() => setIsCreateModalOpen(true)}
-              className="flex items-center space-x-2 bg-amber-500 hover:bg-amber-400 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Gửi Phản Ánh Mẫu</span>
-            </button>
-
-            <button
               onClick={handleExportExcel}
               className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl font-bold text-xs shadow-md transition-all"
             >
@@ -606,14 +598,6 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
                   >
                     <MessageCircle className="w-3.5 h-3.5" />
                     <span>{item.adminResponse ? 'Sửa Phản Hồi' : 'Phản Hồi / Xử Lý'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleDeleteFeedback(item.id, item.title)}
-                    className="p-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-rose-600 border border-slate-200 transition-colors"
-                    title="Xóa phản ánh này"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>

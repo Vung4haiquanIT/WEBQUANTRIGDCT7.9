@@ -105,7 +105,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ progressList, units 
 
         <div className="flex items-center space-x-3 text-xs">
           <div className="bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200 text-slate-700">
-            <span className="font-bold text-blue-600">{progressList.filter(p => p.completed).length}</span> / {progressList.length} Đã hoàn thành ({progressList.length > 0 ? Math.round((progressList.filter(p => p.completed).length / progressList.length) * 100) : 0}%)
+            <span className="font-bold text-blue-600">{progressList.filter(p => p.completed).length}</span> / {progressList.length} Đã hoàn thành ({progressList.length > 0 ? ((progressList.filter(p => p.completed).length / progressList.length) * 100).toFixed(2) : '0.00'}%)
           </div>
         </div>
       </div>
@@ -164,7 +164,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ progressList, units 
               ) : (
                 filtered.map((item, idx) => {
                   const uniqueKey = item.id || `prog-${item.userId || 'u'}-${item.lessonId || 'l'}-${idx}`;
-                  const overall = Math.min(100, Math.max(0, Math.round(Number(item.overallProgress) || 0)));
+                  const overall = Math.min(100, Math.max(0, Number(item.overallProgress) || 0));
                   return (
                     <tr key={uniqueKey} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-4 font-bold text-slate-800">{item.userName}</td>
@@ -181,15 +181,15 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ progressList, units 
                             />
                           </div>
                           <span className="font-bold text-slate-700 font-mono text-[11px]">
-                            {overall}%
+                            {overall.toFixed(2)}%
                           </span>
                         </div>
                       </td>
                       <td className="p-4">
-                        {item.completed || overall >= 85 ? (
+                        {Boolean(item.completed || (item as any).isCompleted || (item as any).hoanThanh || (item as any).daDat) ? (
                           <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px]">
                             <CheckCircle className="w-3 h-3 text-emerald-500" />
-                            <span>Đã đạt chuẩn</span>
+                            <span>Đã hoàn thành</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center space-x-1 text-amber-700 font-medium bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full text-[10px]">

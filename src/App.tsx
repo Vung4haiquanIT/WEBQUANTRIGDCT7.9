@@ -26,6 +26,7 @@ import { ProgressView } from './views/ProgressView';
 import { NotificationsView } from './views/NotificationsView';
 import { RadioBroadcastView } from './views/RadioBroadcastView';
 import { LoginView } from './views/LoginView';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Radio, Bell, CheckCircle } from 'lucide-react';
 
 export function App() {
@@ -115,6 +116,17 @@ export function App() {
       setNotifications(notifsRes);
       setBanners(bannersRes);
       setFeedbacks(feedbacksRes || []);
+
+      // Tự động kiểm tra và đồng bộ năm (year) cho các bài học nếu chưa có để App thống kê chính xác
+      const needsYearSync = lessonsRes.some(l => !l.year || !l.courseYear);
+      if (needsYearSync) {
+        api.syncAllLessonsYear().then((res) => {
+          if (res.updatedCount > 0) {
+            console.log(`[App] Đã tự động đồng bộ năm cho ${res.updatedCount} bài học lên Firestore.`);
+            api.getLessons({ isDeleted: false }).then(updated => setLessons(updated)).catch(() => {});
+          }
+        }).catch((err) => console.warn('[App] Lỗi đồng bộ năm bài học:', err));
+      }
     } catch (err) {
       console.error('Error fetching initial data:', err);
     } finally {
@@ -357,99 +369,102 @@ export function App() {
 
         {/* Dynamic Main Content Workspace */}
         <main className="flex-1 h-full min-h-0 p-4 lg:p-7 overflow-y-auto bg-slate-50/70 overscroll-contain">
-          {isLoading ? (
-            <div className="py-24 text-center text-slate-500 text-xs">
-              <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <span>Đang kết nối hệ thống cơ sở dữ liệu Vùng 4 Hải Quân...</span>
-            </div>
-          ) : selectedLessonForEditing ? (
-            <LessonEditorView
-              lesson={selectedLessonForEditing}
-              onBack={() => setSelectedLessonForEditing(null)}
-              onPreview={(l) => setPreviewLesson(l)}
-              onLessonUpdated={(updated) => {
-                setSelectedLessonForEditing(updated);
-                fetchAllData();
-              }}
-            />
-          ) : currentView === 'dashboard' ? (
-            <DashboardView
-              courses={courses}
-              lessons={lessons}
-              units={units}
-              users={users}
-              progressList={progressList}
-              notifications={notifications}
-              onNavigate={(tab) => setCurrentView(tab)}
-              onSelectLesson={(l) => {
-                setSelectedLessonForEditing(l);
-              }}
-            />
-          ) : currentView === 'courses' ? (
-            <CoursesView
-              courses={courses}
-              lessons={lessons}
-              onSelectLesson={(l) => setSelectedLessonForEditing(l)}
-              onPreviewLesson={(l) => setPreviewLesson(l)}
-              onCreateCourse={handleCreateCourse}
-              onUpdateCourse={handleUpdateCourse}
-              onDeleteCourse={handleDeleteCourse}
-              onCreateLesson={handleCreateLesson}
-              onUpdateLesson={handleUpdateLesson}
-              onDuplicateLesson={handleDuplicateLesson}
-              onDeleteLesson={handleDeleteLesson}
-            />
-          ) : currentView === 'exams' ? (
-            <ExamsView currentUser={adminUser} units={units} users={users} progressList={progressList} />
-          ) : currentView === 'radio' ? (
-            <RadioBroadcastView units={units} currentUser={adminUser as any} />
-          ) : currentView === 'feedbacks' ? (
-            <FeedbacksView currentUser={adminUser} units={units} />
-          ) : currentView === 'users' ? (
-            <UsersView
-              users={users}
-              units={units}
-              onCreateUser={handleCreateUser}
-              onUpdateUser={handleUpdateUser}
-              onDeleteUser={handleDeleteUser}
-              onCreateUnit={handleCreateUnit}
-            />
-          ) : currentView === 'units' ? (
-            <UnitsView
-              units={units}
-              onCreateUnit={handleCreateUnit}
-              onUpdateUnit={handleUpdateUnit}
-            />
-          ) : currentView === 'banners' ? (
-            <BannersView
-              banners={banners}
-              courses={courses}
-              lessons={lessons}
-              onRefresh={fetchAllData}
-            />
-          ) : currentView === 'progress' ? (
-            <ProgressView progressList={progressList} units={units} />
-          ) : currentView === 'notifications' ? (
-            <NotificationsView
-              notifications={notifications}
-              units={units}
-              onCreateNotification={handleCreateNotification}
-              onDeleteNotification={handleDeleteNotification}
-            />
-          ) : (
-            <DashboardView
-              courses={courses}
-              lessons={lessons}
-              units={units}
-              users={users}
-              progressList={progressList}
-              notifications={notifications}
-              onNavigate={(tab) => setCurrentView(tab)}
-              onSelectLesson={(l) => {
-                setSelectedLessonForEditing(l);
-              }}
-            />
-          )}
+          <ErrorBoundary fallbackTitle="Đã xảy ra lỗi khi tải giao diện" onReset={fetchAllData}>
+            {isLoading ? (
+              <div className="py-24 text-center text-slate-500 text-xs">
+                <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                <span>Đang kết nối hệ thống cơ sở dữ liệu Vùng 4 Hải Quân...</span>
+              </div>
+            ) : selectedLessonForEditing ? (
+              <LessonEditorView
+                lesson={selectedLessonForEditing}
+                onBack={() => setSelectedLessonForEditing(null)}
+                onPreview={(l) => setPreviewLesson(l)}
+                onLessonUpdated={(updated) => {
+                  setSelectedLessonForEditing(updated);
+                  fetchAllData();
+                }}
+              />
+            ) : currentView === 'dashboard' ? (
+              <DashboardView
+                courses={courses}
+                lessons={lessons}
+                units={units}
+                users={users}
+                progressList={progressList}
+                notifications={notifications}
+                onNavigate={(tab) => setCurrentView(tab)}
+                onSelectLesson={(l) => {
+                  setSelectedLessonForEditing(l);
+                }}
+              />
+            ) : currentView === 'courses' ? (
+              <CoursesView
+                courses={courses}
+                lessons={lessons}
+                onSelectLesson={(l) => setSelectedLessonForEditing(l)}
+                onPreviewLesson={(l) => setPreviewLesson(l)}
+                onCreateCourse={handleCreateCourse}
+                onUpdateCourse={handleUpdateCourse}
+                onDeleteCourse={handleDeleteCourse}
+                onCreateLesson={handleCreateLesson}
+                onUpdateLesson={handleUpdateLesson}
+                onDuplicateLesson={handleDuplicateLesson}
+                onDeleteLesson={handleDeleteLesson}
+              />
+            ) : currentView === 'exams' ? (
+              <ExamsView currentUser={adminUser} units={units} users={users} progressList={progressList} />
+            ) : currentView === 'radio' ? (
+              <RadioBroadcastView units={units} currentUser={adminUser as any} />
+            ) : currentView === 'feedbacks' ? (
+              <FeedbacksView currentUser={adminUser} units={units} />
+            ) : currentView === 'users' ? (
+              <UsersView
+                users={users}
+                units={units}
+                onCreateUser={handleCreateUser}
+                onUpdateUser={handleUpdateUser}
+                onDeleteUser={handleDeleteUser}
+                onCreateUnit={handleCreateUnit}
+              />
+            ) : currentView === 'units' ? (
+              <UnitsView
+                units={units}
+                users={users}
+                onCreateUnit={handleCreateUnit}
+                onUpdateUnit={handleUpdateUnit}
+              />
+            ) : currentView === 'banners' ? (
+              <BannersView
+                banners={banners}
+                courses={courses}
+                lessons={lessons}
+                onRefresh={fetchAllData}
+              />
+            ) : currentView === 'progress' ? (
+              <ProgressView progressList={progressList} units={units} />
+            ) : currentView === 'notifications' ? (
+              <NotificationsView
+                notifications={notifications}
+                units={units}
+                onCreateNotification={handleCreateNotification}
+                onDeleteNotification={handleDeleteNotification}
+              />
+            ) : (
+              <DashboardView
+                courses={courses}
+                lessons={lessons}
+                units={units}
+                users={users}
+                progressList={progressList}
+                notifications={notifications}
+                onNavigate={(tab) => setCurrentView(tab)}
+                onSelectLesson={(l) => {
+                  setSelectedLessonForEditing(l);
+                }}
+              />
+            )}
+          </ErrorBoundary>
         </main>
       </div>
 

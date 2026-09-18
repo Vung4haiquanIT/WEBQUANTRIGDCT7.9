@@ -42,6 +42,8 @@ export interface User {
   email: string;
   password?: string;       // Mật khẩu đăng nhập (mặc định 123@abc)
   role: UserRole;
+  targetGroup?: 'SQ' | 'QNCN' | string; // Đối tượng: SQ (Sĩ quan), QNCN (Quân nhân chuyên nghiệp)
+  doiTuong?: string;
   rank?: string; // Cấp bậc (Đại úy, Trung tá, Thượng tá...)
   position?: string; // Chức vụ (Chính trị viên, Trợ lý Tuyên huấn...)
   rankAndPosition?: string; // Ví dụ: Thượng úy - TLTH
@@ -50,6 +52,15 @@ export interface User {
   unit?: string; // Ví dụ: Lữ đoàn 162
   avatar?: string;
   status: 'ACTIVE' | 'INACTIVE';
+  isLocked?: boolean;
+  isActive?: boolean;
+  originalPassword?: string;
+  passwordChangedAt?: string;
+  lastPasswordResetAt?: string;
+  forceLogout?: boolean;
+  forceLogoutReason?: string;
+  forceLogoutAt?: string;
+  sessionVersion?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -104,6 +115,8 @@ export interface Lesson {
   lessonCode?: string; // Mã khóa bài học
   courseId: string;
   courseTitle?: string;
+  year?: number; // Năm học tập phục vụ lọc và thống kê trên App
+  courseYear?: number; // Năm của chuyên đề tương ứng
   title: string;
   subtitle?: string;
   description: string;
@@ -789,15 +802,16 @@ export interface ExamSession {
   id: string;
   title: string;                    // Tên đợt kiểm tra (vd: "Đợt 1: Kiểm tra Nhận thức Chính trị Quý 1/2026")
   description?: string;
+  targetGroup?: 'ALL' | 'SQ' | 'QNCN' | string; // Đối tượng tham gia: ALL (Tất cả), SQ (Sĩ quan), QNCN (Quân nhân chuyên nghiệp)
   bankId: string;                   // Bộ đề sử dụng
   bankTitle?: string;
   durationMinutes: number;          // Thời gian làm bài (phút), vd: 20
   passScore: number;                // Điểm đạt (trên thang điểm 10), vd: 5.0
   totalQuestions: number;
-  maxAttempts?: number;             // Số lượt thi tối đa cho mỗi tài khoản, vd: 1 (0 hoặc undefined là không giới hạn)
+  maxAttempts?: number;             // Số lượt thi tối đa cho mỗi tài khoản, vd: 3 (0 hoặc undefined là không giới hạn)
   questions?: ExamQuestion[];        // Toàn bộ bộ câu hỏi đẩy lên App di động
   targetUnit: string;               // 'ALL' hoặc tên Đơn vị cụ thể
-  status: 'DRAFT' | 'ACTIVE' | 'COMPLETED'; // Trạng thái đợt kiểm tra
+  status: 'DRAFT' | 'ACTIVE' | 'COMPLETED' | 'UPCOMING' | string; // Trạng thái đợt kiểm tra
   pushedToAppAt?: string;           // Thời điểm đồng bộ bộ đề lên Cloud App
   startTime?: string;
   endTime?: string;

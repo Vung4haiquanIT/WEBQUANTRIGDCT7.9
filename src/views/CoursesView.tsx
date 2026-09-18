@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
@@ -13,7 +13,6 @@ import {
   ChevronRight,
   Sparkles,
   Calendar,
-  CheckCircle2,
   AlertCircle,
   FileText,
   Video,
@@ -23,7 +22,8 @@ import {
   ArrowUpDown,
   Upload,
   Image as ImageIcon,
-  Lock
+  Lock,
+  Settings
 } from 'lucide-react';
 import { Course, Lesson, PublishStatus } from '../types';
 import { DongSonDrum } from '../components/DongSonMotif';
@@ -70,6 +70,31 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<PublishStatus | 'ALL'>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
+  // Lấy danh sách các năm thực tế đang có trong dữ liệu Chuyên đề và Bài học
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<number>();
+    courses.forEach((c) => {
+      if (c.year && typeof c.year === 'number' && !isNaN(c.year)) {
+        yearsSet.add(c.year);
+      } else {
+        const match = (c.title || '').match(/20\d{2}/);
+        if (match) yearsSet.add(parseInt(match[0], 10));
+      }
+    });
+    lessons.forEach((l) => {
+      if (l.year && typeof l.year === 'number' && !isNaN(l.year)) {
+        yearsSet.add(l.year);
+      } else {
+        const match = (l.title || '').match(/20\d{2}/);
+        if (match) yearsSet.add(parseInt(match[0], 10));
+      }
+    });
+    if (yearsSet.size === 0) {
+      yearsSet.add(new Date().getFullYear());
+    }
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [courses, lessons]);
+
   // Modal state for Course
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
@@ -97,6 +122,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     showVideos: true,
     showAudios: true,
     createdBy: 'Ban Tuyên huấn Vùng 4',
+    year: 2026,
   });
 
   const toggleCourseExpand = (courseId: string) => {
@@ -207,6 +233,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const handleOpenNewLesson = (courseId: string) => {
     setEditingLesson(null);
     setSelectedCourseForNewLesson(courseId);
+    const parentCourse = courses.find((c) => c.id === courseId);
+    const courseYear = parentCourse?.year || ((parentCourse?.title || '').match(/20\d{2}/) ? parseInt((parentCourse?.title || '').match(/20\d{2}/)![0], 10) : new Date().getFullYear());
     setLessonFormData({
       courseId,
       title: '',
@@ -217,6 +245,27 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       showVideos: true,
       showAudios: true,
       createdBy: 'Ban Tuyên huấn Vùng 4',
+      year: courseYear,
+    });
+    setIsLessonModalOpen(true);
+  };
+
+  const handleOpenEditLesson = (lesson: Lesson) => {
+    setEditingLesson(lesson);
+    setSelectedCourseForNewLesson(lesson.courseId);
+    const parentCourse = courses.find((c) => c.id === lesson.courseId);
+    const lessonYear = lesson.year || lesson.courseYear || parentCourse?.year || ((parentCourse?.title || '').match(/20\d{2}/) ? parseInt((parentCourse?.title || '').match(/20\d{2}/)![0], 10) : new Date().getFullYear());
+    setLessonFormData({
+      courseId: lesson.courseId,
+      title: lesson.title,
+      thumbnail: lesson.thumbnail || 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=600&q=80',
+      status: lesson.status,
+      showSlides: lesson.moduleConfig?.showSlides !== false,
+      showContents: lesson.moduleConfig?.showContents !== false,
+      showVideos: lesson.moduleConfig?.showVideos !== false,
+      showAudios: lesson.moduleConfig?.showAudios !== false,
+      createdBy: lesson.createdBy || 'Ban Tuyên huấn Vùng 4',
+      year: lessonYear,
     });
     setIsLessonModalOpen(true);
   };
@@ -224,8 +273,14 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const handleSubmitLesson = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!lessonFormData.title.trim() || !lessonFormData.courseId) return;
-    const payload = {
+    const parentCourse = courses.find((c) => c.id === lessonFormData.courseId);
+    const resolvedYear = lessonFormData.year || parentCourse?.year || new Date().getFullYear();
+
+    const payload: Partial<Lesson> = {
       courseId: lessonFormData.courseId,
+      courseTitle: parentCourse?.title || '',
+      year: resolvedYear,
+      courseYear: resolvedYear,
       title: lessonFormData.title,
       thumbnail: lessonFormData.thumbnail,
       status: lessonFormData.status,
@@ -249,8 +304,11 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const filteredCourses = courses.filter((c) => {
     const matchSearchQuery = !searchFilter.trim() ||
       matchSearch(c.title, searchFilter) ||
-      matchSearch(c.description, searchFilter);
-    const matchYear = yearFilter === 'ALL' || c.year === yearFilter;
+      matchSearch(c.description, searchFilter) ||
+      lessons.some((l) => l.courseId === c.id && !l.isDeleted && matchSearch(l.title, searchFilter));
+    
+    const cYear = c.year || ((c.title || '').match(/20\d{2}/) ? parseInt((c.title || '').match(/20\d{2}/)![0], 10) : undefined);
+    const matchYear = yearFilter === 'ALL' || cYear === yearFilter || lessons.some((l) => l.courseId === c.id && !l.isDeleted && (l.year === yearFilter || (!l.year && cYear === yearFilter)));
     const matchStatus = statusFilter === 'ALL' || c.status === statusFilter;
     
     let matchCategory = true;
@@ -377,17 +435,20 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-3 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           <div className="flex items-center space-x-1.5">
             <span className="text-slate-600 font-medium">Năm:</span>
             <select
               value={yearFilter}
               onChange={(e) => setYearFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium"
+              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium cursor-pointer"
             >
               <option value="ALL">Tất cả các năm</option>
-              <option value={2026}>Năm 2026</option>
-              <option value={2025}>Năm 2025</option>
+              {availableYears.map((y) => (
+                <option key={y} value={y}>
+                  Năm {y}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -396,7 +457,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as any)}
-              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium"
+              className="bg-slate-50 border border-slate-200 text-slate-800 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-blue-500 font-medium cursor-pointer"
             >
               <option value="ALL">Tất cả trạng thái</option>
               <option value="PUBLISHED">Công khai</option>
@@ -418,7 +479,14 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
           ) : (
             filteredCourses.map((course) => {
               const isExpanded = !!expandedCourseIds[course.id];
-              const courseLessons = lessons.filter((l) => l.courseId === course.id && !l.isDeleted);
+              const courseLessons = lessons.filter((l) => {
+                if (l.courseId !== course.id || l.isDeleted) return false;
+                if (yearFilter !== 'ALL') {
+                  const lYear = l.year || l.courseYear || course.year || ((course.title || '').match(/20\d{2}/) ? parseInt((course.title || '').match(/20\d{2}/)![0], 10) : undefined);
+                  return lYear === yearFilter;
+                }
+                return true;
+              });
               const isFixed = course.isFixed !== undefined ? course.isFixed : isFixedCourse(course);
 
               return (
@@ -543,8 +611,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
                                 <div className="min-w-0 flex-1">
                                   <div className="flex flex-wrap items-center gap-2">
-                                    <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                                      Bài #{lesson.order}
+                                    <span className="text-[10px] font-extrabold text-amber-900 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300">
+                                      Năm {lesson.year || lesson.courseYear || course.year || 2026}
                                     </span>
                                     <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                       v{lesson.version}
@@ -611,6 +679,14 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
                                   <span>Soạn thảo</span>
+                                </button>
+
+                                <button
+                                  onClick={() => handleOpenEditLesson(lesson)}
+                                  title="Chỉnh sửa thông tin / Chuyên đề / Năm của bài học"
+                                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                                >
+                                  <Settings className="w-3.5 h-3.5" />
                                 </button>
 
                                 <button
@@ -789,7 +865,12 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                 <label className="block text-slate-700 font-bold mb-1">Thuộc chuyên đề *</label>
                 <select
                   value={lessonFormData.courseId}
-                  onChange={(e) => setLessonFormData({ ...lessonFormData, courseId: e.target.value })}
+                  onChange={(e) => {
+                    const newCourseId = e.target.value;
+                    const cTarget = courses.find((c) => c.id === newCourseId);
+                    const cYear = cTarget?.year || ((cTarget?.title || '').match(/20\d{2}/) ? parseInt((cTarget?.title || '').match(/20\d{2}/)![0], 10) : new Date().getFullYear());
+                    setLessonFormData({ ...lessonFormData, courseId: newCourseId, year: cYear });
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-bold"
                 >
                   {courses.map((c) => (
@@ -817,7 +898,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                 <select
                   value={lessonFormData.status}
                   onChange={(e) => setLessonFormData({ ...lessonFormData, status: e.target.value as PublishStatus })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-bold"
                 >
                   <option value="REVIEW">Chờ thẩm định</option>
                   <option value="INTERNAL">Nội bộ</option>

@@ -264,7 +264,33 @@ export const firestoreService = {
     });
     await updateDoc(docRef, updatePayload);
     const updatedSnap = await getDoc(docRef);
-    return updatedSnap.data() as Course;
+    const updatedCourse = updatedSnap.data() as Course;
+
+    // Tự động đồng bộ năm (year) và tiêu đề chuyên đề sang tất cả các bài học trực thuộc
+    if (data.year || data.title) {
+      try {
+        const lessonsSnap = await getDocs(query(collection(db, 'lessons'), where('courseId', '==', id)));
+        if (!lessonsSnap.empty) {
+          const batch = writeBatch(db);
+          lessonsSnap.docs.forEach((d) => {
+            const patch: any = { updatedAt: now };
+            if (data.year) {
+              patch.year = data.year;
+              patch.courseYear = data.year;
+            }
+            if (data.title) {
+              patch.courseTitle = data.title;
+            }
+            batch.update(d.ref, patch);
+          });
+          await batch.commit().catch((e) => console.warn('[updateCourse cascade lessons warning]:', e));
+        }
+      } catch (syncErr) {
+        console.warn('[updateCourse sync lessons error]:', syncErr);
+      }
+    }
+
+    return updatedCourse;
   },
 
   deleteCourse: async (id: string, permanent = false): Promise<{ success: boolean; message: string }> => {
@@ -365,10 +391,41 @@ export const firestoreService = {
     const lessonCode = data.lessonCode || `BH-${Date.now().toString().slice(-6)}`;
     const docRef = doc(db, 'lessons', id);
     const now = new Date().toISOString();
+
+    // Xác định năm học tập và tiêu đề chuyên đề cha
+    let lessonYear = data.year || data.courseYear;
+    let courseTitle = data.courseTitle || '';
+
+    if ((!lessonYear || !courseTitle) && data.courseId) {
+      try {
+        const courseSnap = await getDoc(doc(db, 'courses', data.courseId));
+        if (courseSnap.exists()) {
+          const cData = courseSnap.data() as Course;
+          if (!lessonYear) {
+            lessonYear = cData.year;
+            if (!lessonYear && cData.title) {
+              const match = cData.title.match(/20\d{2}/);
+              if (match) lessonYear = parseInt(match[0], 10);
+            }
+          }
+          if (!courseTitle) courseTitle = cData.title;
+        }
+      } catch (e) {
+        console.warn('Cannot fetch parent course for lesson year:', e);
+      }
+    }
+    if (!lessonYear) {
+      const match = (data.title || '').match(/20\d{2}/);
+      lessonYear = match ? parseInt(match[0], 10) : new Date().getFullYear();
+    }
+
     const lesson: Lesson = {
       id,
       lessonCode,
       courseId: data.courseId || '',
+      courseTitle,
+      year: lessonYear,
+      courseYear: lessonYear,
       title: data.title || 'Bài học mới',
       subtitle: data.subtitle || '',
       description: data.description || '',
@@ -404,6 +461,34 @@ export const firestoreService = {
     
     const prev = existing.data() as Lesson;
     const now = new Date().toISOString();
+
+    // Xác định năm học tập và tiêu đề chuyên đề
+    let targetYear = data.year || data.courseYear || prev.year || prev.courseYear;
+    let targetCourseTitle = data.courseTitle || prev.courseTitle || '';
+    const targetCourseId = data.courseId || prev.courseId;
+
+    if ((!targetYear || !targetCourseTitle || (data.courseId && data.courseId !== prev.courseId)) && targetCourseId) {
+      try {
+        const courseSnap = await getDoc(doc(db, 'courses', targetCourseId));
+        if (courseSnap.exists()) {
+          const cData = courseSnap.data() as Course;
+          if (!data.year || (data.courseId && data.courseId !== prev.courseId)) {
+            targetYear = cData.year;
+            if (!targetYear && cData.title) {
+              const match = cData.title.match(/20\d{2}/);
+              if (match) targetYear = parseInt(match[0], 10);
+            }
+          }
+          if (!data.courseTitle) targetCourseTitle = cData.title;
+        }
+      } catch (e) {
+        console.warn('Cannot fetch parent course for lesson update:', e);
+      }
+    }
+    if (!targetYear) {
+      const match = (data.title || prev.title || '').match(/20\d{2}/);
+      targetYear = match ? parseInt(match[0], 10) : new Date().getFullYear();
+    }
     
     // Tự động quản lý phiên bản theo quy chuẩn GDCT
     const isContentChanged = !!(data.title || data.subtitle || data.description || data.status);
@@ -411,6 +496,9 @@ export const firestoreService = {
 
     const updatePayload = {
       ...data,
+      year: targetYear,
+      courseYear: targetYear,
+      courseTitle: targetCourseTitle,
       version: (prev.version || 1) + 1,
       contentVersion: isContentChanged ? (prev.contentVersion || 1) + 1 : prev.contentVersion || 1,
       mediaVersion: isMediaChanged ? (prev.mediaVersion || 1) + 1 : prev.mediaVersion || 1,
@@ -421,6 +509,69 @@ export const firestoreService = {
     await updateDoc(docRef, updatePayload);
     const updatedSnap = await getDoc(docRef);
     return updatedSnap.data() as Lesson;
+  },
+
+  // Đồng bộ toàn bộ năm học (year) từ Chuyên đề sang tất cả các Bài học cho App
+  syncAllLessonsYear: async (): Promise<{ updatedCount: number; totalLessons: number }> => {
+    try {
+      const [coursesSnap, lessonsSnap] = await Promise.all([
+        getDocs(collection(db, 'courses')),
+        getDocs(collection(db, 'lessons'))
+      ]);
+
+      const coursesMap = new Map<string, Course>();
+      coursesSnap.docs.forEach((d) => {
+        coursesMap.set(d.id, d.data() as Course);
+      });
+
+      let updatedCount = 0;
+      const batch = writeBatch(db);
+      let batchOps = 0;
+
+      lessonsSnap.docs.forEach((d) => {
+        const l = d.data() as Lesson;
+        const parentCourse = coursesMap.get(l.courseId);
+        let correctYear = l.year || l.courseYear;
+        let correctCourseTitle = l.courseTitle;
+
+        if (parentCourse) {
+          if (!correctYear || (parentCourse.year && correctYear !== parentCourse.year)) {
+            correctYear = parentCourse.year;
+          }
+          if (!correctYear && parentCourse.title) {
+            const match = parentCourse.title.match(/20\d{2}/);
+            if (match) correctYear = parseInt(match[0], 10);
+          }
+          if (!correctCourseTitle) {
+            correctCourseTitle = parentCourse.title;
+          }
+        }
+
+        if (!correctYear) {
+          const match = (l.title || '').match(/20\d{2}/);
+          correctYear = match ? parseInt(match[0], 10) : 2026;
+        }
+
+        if (l.year !== correctYear || l.courseYear !== correctYear || (!l.courseTitle && correctCourseTitle)) {
+          batch.update(d.ref, {
+            year: correctYear,
+            courseYear: correctYear,
+            courseTitle: correctCourseTitle || '',
+            updatedAt: new Date().toISOString()
+          });
+          updatedCount++;
+          batchOps++;
+        }
+      });
+
+      if (batchOps > 0) {
+        await batch.commit();
+      }
+      return { updatedCount, totalLessons: lessonsSnap.size };
+    } catch (err) {
+      console.error('Lỗi khi đồng bộ năm bài học:', err);
+      return { updatedCount: 0, totalLessons: 0 };
+    }
   },
 
   deleteLesson: async (id: string, permanent = false): Promise<{ success: boolean; message: string }> => {
@@ -1490,7 +1641,9 @@ export const firestoreService = {
   getUnits: async (): Promise<Unit[]> => {
     const colRef = collection(db, 'units');
     const snap = await getDocs(colRef);
-    return snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as Unit));
+    return snap.docs
+      .map(d => ({ id: d.id, ...(d.data() as any) } as Unit))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi', { numeric: true, sensitivity: 'base' }));
   },
 
   // -------------------------------------------------------------
@@ -1504,7 +1657,34 @@ export const firestoreService = {
       let r = data.role || 'USER';
       if (r === 'SUPER_ADMIN') r = 'ADMIN';
       if (r === 'CONTENT_ADMIN' || r === 'UNIT_ADMIN') r = 'APPROVER';
-      return { id: d.id, ...data, role: r } as User;
+      const cleanPassword = data.originalPassword || (data.password ? data.password.replace(/^__LOCKED__/, '') : '123@abc');
+      const isInactive = data.status === 'INACTIVE' || data.status === 'LOCKED' || data.isLocked === true || data.locked === true || data.isActive === false || data.disabled === true || data.accountStatus === 'LOCKED';
+      const fullName = data.fullName || data.name || data.userName || `Quân nhân ${d.id.slice(-4)}`;
+      const email = data.email || data.userEmail || '';
+      const rank = data.rank || 'Chiến sĩ';
+      const position = data.position || 'Quân nhân';
+      const rankAndPosition = data.rankAndPosition || `${rank} - ${position}`;
+      const unit = data.unit || data.unitName || 'BTL Vùng 4';
+      const unitName = data.unitName || data.unit || 'BTL Vùng 4';
+
+      return { 
+        id: d.id, 
+        ...data, 
+        name: fullName,
+        fullName: fullName,
+        email: email,
+        rank: rank,
+        position: position,
+        rankAndPosition: rankAndPosition,
+        unit: unit,
+        unitName: unitName,
+        role: r, 
+        status: isInactive ? 'INACTIVE' : 'ACTIVE',
+        password: cleanPassword,
+        originalPassword: cleanPassword,
+        isLocked: isInactive,
+        isActive: !isInactive
+      } as User;
     });
   },
 
@@ -1550,6 +1730,82 @@ export const firestoreService = {
       patch.name = patch.fullName;
     }
 
+    const currentSnap = await getDoc(docRef);
+    const currentData = currentSnap.exists() ? (currentSnap.data() as any) : {};
+    const existingPassword = currentData.originalPassword || (currentData.password ? currentData.password.replace(/^__LOCKED__/, '') : '123@abc');
+
+    const isLocking = patch.status === 'INACTIVE' || patch.status === 'LOCKED' || patch.isLocked === true || patch.isActive === false;
+    const isActivating = patch.status === 'ACTIVE' || (patch.status && patch.status !== 'INACTIVE' && patch.status !== 'LOCKED') || (patch.isLocked === false) || (patch.isActive === true);
+
+    if (isLocking) {
+      patch.status = 'INACTIVE';
+      patch.isLocked = true;
+      patch.locked = true;
+      patch.isActive = false;
+      patch.active = false;
+      patch.disabled = true;
+      patch.isBlocked = true;
+      patch.blocked = true;
+      patch.accountStatus = 'LOCKED';
+      patch.lockStatus = 'LOCKED';
+      patch.appStatus = 'LOCKED';
+      patch.state = 'LOCKED';
+      patch.canLogin = false;
+      patch.loginAllowed = false;
+      patch.lockedAt = now;
+      patch.lockReason = 'Tài khoản đã bị tạm khóa bởi quản trị viên';
+      patch.forceLogout = true;
+      patch.forceLogoutReason = 'Tài khoản đã bị tạm khóa bởi quản trị viên';
+      patch.forceLogoutAt = now;
+      patch.sessionVersion = ((currentData.sessionVersion || 1) + 1);
+      patch.originalPassword = existingPassword;
+      // In case the mobile app doesn't check any status flag in code and only queries where('password', '==', inputPassword):
+      // By setting password to `__LOCKED__${existingPassword}`, the mobile app query will reject the login.
+      // At the same time, existingPassword is kept safely in originalPassword and restored on unlock.
+      if (!patch.password || patch.password === existingPassword || !patch.password.startsWith('__LOCKED__')) {
+        patch.password = `__LOCKED__${existingPassword}`;
+      }
+    } else if (isActivating) {
+      patch.status = 'ACTIVE';
+      patch.isLocked = false;
+      patch.locked = false;
+      patch.isActive = true;
+      patch.active = true;
+      patch.disabled = false;
+      patch.isBlocked = false;
+      patch.blocked = false;
+      patch.accountStatus = 'ACTIVE';
+      patch.lockStatus = 'ACTIVE';
+      patch.appStatus = 'ACTIVE';
+      patch.state = 'ACTIVE';
+      patch.canLogin = true;
+      patch.loginAllowed = true;
+      patch.lockReason = null;
+      patch.forceLogout = false;
+      // Restore password if it was locked
+      const restoredPass = patch.password 
+        ? patch.password.replace(/^__LOCKED__/, '') 
+        : existingPassword;
+      patch.password = restoredPass;
+      patch.originalPassword = restoredPass;
+    } else if (patch.password) {
+      // Password update / reset without state change
+      const cleanNewPassword = patch.password.replace(/^__LOCKED__/, '').trim();
+      const isCurrentlyLocked = currentData.status === 'INACTIVE' || currentData.status === 'LOCKED' || currentData.isLocked === true || currentData.isActive === false;
+      
+      patch.originalPassword = cleanNewPassword;
+      patch.password = isCurrentlyLocked ? `__LOCKED__${cleanNewPassword}` : cleanNewPassword;
+
+      if (cleanNewPassword !== existingPassword) {
+        patch.passwordChangedAt = now;
+        patch.lastPasswordResetAt = now;
+        patch.forceLogout = true;
+        patch.forceLogoutReason = 'Mật khẩu đã được thay đổi bởi quản trị viên. Vui lòng đăng nhập lại.';
+        patch.forceLogoutAt = now;
+        patch.sessionVersion = ((currentData.sessionVersion || 1) + 1);
+      }
+    }
+
     const updatePayload = sanitizeFirestoreData({ ...patch, updatedAt: now });
     await updateDoc(docRef, updatePayload);
 
@@ -1570,19 +1826,19 @@ export const firestoreService = {
           const batch = writeBatch(db);
           
           subSnap.docs.forEach(d => {
-            const patch: any = {};
-            if (displayName) patch.userName = displayName;
-            if (rank) patch.userRank = rank;
-            if (position) patch.userPosition = position;
-            if (unitName) patch.unitName = unitName;
-            batch.update(d.ref, patch);
+            const patchItem: any = {};
+            if (displayName) patchItem.userName = displayName;
+            if (rank) patchItem.userRank = rank;
+            if (position) patchItem.userPosition = position;
+            if (unitName) patchItem.unitName = unitName;
+            batch.update(d.ref, patchItem);
           });
 
           progSnap.docs.forEach(d => {
-            const patch: any = {};
-            if (displayName) patch.userName = displayName;
-            if (unitName) patch.unitName = unitName;
-            batch.update(d.ref, patch);
+            const patchItem: any = {};
+            if (displayName) patchItem.userName = displayName;
+            if (unitName) patchItem.unitName = unitName;
+            batch.update(d.ref, patchItem);
           });
 
           await batch.commit().catch(e => console.warn('[updateUserAndSync batch warning]:', e));
@@ -1597,7 +1853,19 @@ export const firestoreService = {
     let r = updatedData.role || 'USER';
     if (r === 'SUPER_ADMIN') r = 'ADMIN';
     if (r === 'CONTENT_ADMIN' || r === 'UNIT_ADMIN') r = 'APPROVER';
-    return { id: updatedSnap.id, ...updatedData, role: r } as User;
+    const cleanPassword = updatedData.originalPassword || (updatedData.password ? updatedData.password.replace(/^__LOCKED__/, '') : '123@abc');
+    const isInactive = updatedData.status === 'INACTIVE' || updatedData.status === 'LOCKED' || updatedData.isLocked === true || updatedData.isActive === false;
+
+    return { 
+      id: updatedSnap.id, 
+      ...updatedData, 
+      role: r,
+      status: isInactive ? 'INACTIVE' : 'ACTIVE',
+      password: cleanPassword,
+      originalPassword: cleanPassword,
+      isLocked: isInactive,
+      isActive: !isInactive
+    } as User;
   },
 
   // -------------------------------------------------------------
@@ -1632,7 +1900,9 @@ export const firestoreService = {
       }
 
       // Calculate component and overall progress cleanly
-      const isCompl = Boolean(data.completed || data.hoanThanh || data.isCompleted || data.daDat);
+      const isCompl = data.completed !== undefined 
+        ? Boolean(data.completed) 
+        : Boolean(data.hoanThanh || data.isCompleted || data.daDat);
       const sProg = typeof data.slideProgress === 'number' 
         ? data.slideProgress 
         : (data.daXemSlide || data.viewedSlides ? 100 : 0);
@@ -1668,7 +1938,7 @@ export const firestoreService = {
         audioProgress: aProg,
         contentProgress: cProg,
         overallProgress: overall,
-        completed: isCompl || overall >= 85,
+        completed: isCompl,
         lastAccessedAt: isoTime,
         completedAt: data.completedAt || (isCompl ? isoTime : undefined),
         version: data.version || 1
@@ -1731,7 +2001,9 @@ export const firestoreService = {
           isoTime = rawTime.toDate().toISOString();
         }
 
-        const isCompl = Boolean(data.completed || data.hoanThanh || data.isCompleted || data.daDat);
+        const isCompl = data.completed !== undefined 
+          ? Boolean(data.completed) 
+          : Boolean(data.hoanThanh || data.isCompleted || data.daDat);
         const sProg = typeof data.slideProgress === 'number' 
           ? data.slideProgress 
           : (data.daXemSlide || data.viewedSlides ? 100 : 0);
@@ -1767,7 +2039,7 @@ export const firestoreService = {
           audioProgress: aProg,
           contentProgress: cProg,
           overallProgress: overall,
-          completed: isCompl || overall >= 85,
+          completed: isCompl,
           lastAccessedAt: isoTime,
           completedAt: data.completedAt || (isCompl ? isoTime : undefined),
           version: data.version || 1
@@ -2082,12 +2354,39 @@ export const firestoreService = {
     const draftLessons = lessons.filter(l => l.status === 'DRAFT').length;
     const reviewLessons = lessons.filter(l => l.status === 'REVIEW').length;
     
-    const allProgress = progressSnap.docs.map(d => d.data() as UserProgress);
-    const completed = allProgress.filter(p => p.completed).length;
-    const inProgress = allProgress.length - completed;
-    const avgRate = allProgress.length > 0
-      ? Math.round(allProgress.reduce((acc, curr) => acc + (curr.overallProgress || 0), 0) / allProgress.length)
-      : 0;
+    const validPublishedLessons = publishedLessons || lessons.filter(l => !l.isDeleted).length || 1;
+    const allProgress = progressSnap.docs.map(d => d.data() as any);
+    const completedProgress = allProgress.filter(p => Boolean(p.completed === true || p.isCompleted === true || p.hoanThanh === true || p.daDat === true));
+
+    // Thống kê theo quân nhân
+    const soldiersMap = new Map<string, Set<string>>();
+    usersSnap.docs.forEach(d => {
+      soldiersMap.set(d.id, new Set<string>());
+    });
+    completedProgress.forEach(p => {
+      const uId = p.userId || p.user_id || p.nguoiDungId;
+      const lId = p.lessonId || p.lesson_id || p.baiHocId;
+      if (uId && lId) {
+        if (soldiersMap.has(uId)) {
+          soldiersMap.get(uId)!.add(lId);
+        } else {
+          const s = new Set<string>();
+          s.add(lId);
+          soldiersMap.set(uId, s);
+        }
+      }
+    });
+
+    const soldierCount = soldiersMap.size || 1;
+    let totalRatios = 0;
+    let completedLearnersCount = 0;
+    soldiersMap.forEach(sSet => {
+      if (sSet.size > 0) completedLearnersCount += 1;
+      totalRatios += Math.min(1, sSet.size / validPublishedLessons);
+    });
+
+    const avgRate = Number(((totalRatios / soldierCount) * 100).toFixed(2));
+    const inProgress = Math.max(0, soldierCount - completedLearnersCount);
 
     return {
       totalCourses: coursesSnap.size,
@@ -2098,7 +2397,7 @@ export const firestoreService = {
       totalUsers: usersSnap.size,
       totalUnits: unitsSnap.size,
       totalStudySessions: allProgress.length,
-      completedLearners: completed,
+      completedLearners: completedLearnersCount,
       inProgressLearners: inProgress,
       averageCompletionRate: avgRate,
       storageStats: {
@@ -2967,12 +3266,13 @@ export const firestoreService = {
       id,
       title: data.title || 'Đợt kiểm tra mới',
       description: data.description || '',
+      targetGroup: data.targetGroup || 'ALL',
       bankId: data.bankId || '',
       bankTitle: data.bankTitle || '',
       durationMinutes: Number(data.durationMinutes) || 20,
       passScore: Number(data.passScore) || 5.0,
       totalQuestions: selectedQuestions.length,
-      maxAttempts: data.maxAttempts !== undefined ? Number(data.maxAttempts) : 1,
+      maxAttempts: data.maxAttempts !== undefined ? Number(data.maxAttempts) : 3,
       questions: selectedQuestions,
       targetUnit: data.targetUnit || 'ALL',
       status: data.status || 'ACTIVE',
@@ -3129,7 +3429,11 @@ export const firestoreService = {
       const sampleDocs = snap.docs.filter(d => 
         d.id.startsWith('sub-init-') || 
         d.id.startsWith('sub-sample-') || 
-        d.id.startsWith('sub-seed-')
+        d.id.startsWith('sub-seed-') ||
+        d.id.startsWith('sim-') ||
+        d.id.startsWith('sub-sim-') ||
+        (d.data() as any).isSimulator === true ||
+        (d.data() as any).userId?.startsWith('user-sim-')
       );
       if (sampleDocs.length > 0) {
         const batch = writeBatch(db);
@@ -3294,11 +3598,15 @@ export const firestoreService = {
       }
       const snap = await getDocs(q);
 
-      // Filter out any lingering sample docs
+      // Filter out any lingering sample or test simulator docs
       const realDocs = snap.docs.filter(d => 
         !d.id.startsWith('sub-init-') && 
         !d.id.startsWith('sub-sample-') && 
-        !d.id.startsWith('sub-seed-')
+        !d.id.startsWith('sub-seed-') &&
+        !d.id.startsWith('sim-') &&
+        !d.id.startsWith('sub-sim-') &&
+        !(d.data() as any).isSimulator &&
+        !(d.data() as any).userId?.startsWith('user-sim-')
       );
 
       // Fetch registered users from Firestore to dynamically enrich submission records
@@ -3413,7 +3721,11 @@ export const firestoreService = {
       const realDocs = snapshot.docs.filter(d => 
         !d.id.startsWith('sub-init-') && 
         !d.id.startsWith('sub-sample-') && 
-        !d.id.startsWith('sub-seed-')
+        !d.id.startsWith('sub-seed-') &&
+        !d.id.startsWith('sim-') &&
+        !d.id.startsWith('sub-sim-') &&
+        !(d.data() as any).isSimulator &&
+        !(d.data() as any).userId?.startsWith('user-sim-')
       );
 
       const subs = realDocs.map(d => {
