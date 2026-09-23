@@ -42,7 +42,7 @@ export interface User {
   email: string;
   password?: string;       // Mật khẩu đăng nhập (mặc định 123@abc)
   role: UserRole;
-  targetGroup?: 'SQ' | 'QNCN' | string; // Đối tượng: SQ (Sĩ quan), QNCN (Quân nhân chuyên nghiệp)
+  targetGroup?: 'SQ' | 'QNCN' | 'HSQ-BS' | string; // Đối tượng: SQ (Sĩ quan), QNCN (Quân nhân chuyên nghiệp), HSQ-BS (Hạ sĩ quan - Binh sĩ)
   doiTuong?: string;
   rank?: string; // Cấp bậc (Đại úy, Trung tá, Thượng tá...)
   position?: string; // Chức vụ (Chính trị viên, Trợ lý Tuyên huấn...)
@@ -802,7 +802,7 @@ export interface ExamSession {
   id: string;
   title: string;                    // Tên đợt kiểm tra (vd: "Đợt 1: Kiểm tra Nhận thức Chính trị Quý 1/2026")
   description?: string;
-  targetGroup?: 'ALL' | 'SQ' | 'QNCN' | string; // Đối tượng tham gia: ALL (Tất cả), SQ (Sĩ quan), QNCN (Quân nhân chuyên nghiệp)
+  targetGroup?: 'ALL' | 'SQ' | 'QNCN' | 'HSQ-BS' | string; // Đối tượng tham gia: ALL (Tất cả), SQ (Sĩ quan), QNCN (Quân nhân chuyên nghiệp), HSQ-BS (Hạ sĩ quan - Binh sĩ)
   bankId: string;                   // Bộ đề sử dụng
   bankTitle?: string;
   durationMinutes: number;          // Thời gian làm bài (phút), vd: 20
@@ -852,6 +852,14 @@ export interface ExamSubmission {
 export type FeedbackType = 'QUESTION_ERROR' | 'EXAM_ERROR' | 'APP_SUGGESTION' | 'GDCT_CONTENT' | 'OTHER';
 export type FeedbackStatus = 'PENDING' | 'RECEIVED' | 'PROCESSING' | 'RESOLVED';
 
+export interface FeedbackReplyItem {
+  id: string;
+  content: string;
+  respondedBy: string;
+  respondedAt: string;
+  timestamp?: number;
+}
+
 export interface UserFeedback {
   id: string;
   userId: string;
@@ -868,6 +876,17 @@ export interface UserFeedback {
   adminResponse?: string;
   respondedBy?: string;
   respondedAt?: string;
+  responses?: FeedbackReplyItem[];
+  replies?: FeedbackReplyItem[];
+  images?: string[];
+  imageUrls?: string[];
+  imageUrl?: string;
+  image?: string;
+  attachedImages?: string[];
+  danhSachHinhAnh?: string[];
+  hinhAnh?: string[] | string;
+  hasAttachment?: boolean;
+  attachmentCount?: number;
   createdAt: string;
   updatedAt: string;
 }

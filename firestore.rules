@@ -244,6 +244,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Cuộc thi trực tuyến & Kết quả thi Collection
+    match /ket_qua_thi/{resultId} {
+      allow read, write: if true;
+    }
+
     // User Feedbacks Collection
     match /user_feedbacks/{feedbackId} {
       allow read, write: if true;

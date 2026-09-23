@@ -59,6 +59,10 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
     }
   };
 
+  const displayNotifications = notifications.filter(
+    (notif: any) => !notif.feedbackId && !notif.id?.startsWith('notif-fb-') && !notif.isPersonal && notif.type !== 'FEEDBACK_RESPONSE'
+  );
+
   return (
     <div className="space-y-6 pb-12">
       {/* Header */}
@@ -86,12 +90,12 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
 
       {/* Notifications List */}
       <div className="space-y-4">
-        {notifications.length === 0 ? (
+        {displayNotifications.length === 0 ? (
           <div className="p-12 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 shadow-xs">
             Chưa có thông báo nào được phát lệnh.
           </div>
         ) : (
-          notifications.map((notif) => (
+          displayNotifications.map((notif) => (
             <div
               key={notif.id}
               className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs hover:border-slate-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"

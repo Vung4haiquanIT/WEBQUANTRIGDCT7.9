@@ -85,8 +85,22 @@ export const QuillEditor: React.FC<QuillEditorProps> = ({
     }
   }, [value]);
 
+  const handleWrapperClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // If clicking inside the wrapper area (e.g. whitespace below editor), focus quill
+    if (quillRef.current) {
+      const target = e.target as HTMLElement;
+      // If user clicked toolbar or buttons, don't force focus away
+      if (!target.closest('.ql-toolbar')) {
+        quillRef.current.focus();
+      }
+    }
+  };
+
   return (
-    <div className={`quill-editor-wrapper bg-white rounded-xl border border-slate-300 overflow-hidden shadow-2xs ${className}`}>
+    <div 
+      onClick={handleWrapperClick}
+      className={`quill-editor-wrapper bg-white rounded-xl border border-slate-300 overflow-hidden shadow-2xs cursor-text ${className}`}
+    >
       <div ref={containerRef} className="min-h-[280px] text-slate-900 text-sm font-sans" />
     </div>
   );

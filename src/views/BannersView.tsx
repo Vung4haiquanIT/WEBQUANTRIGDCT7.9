@@ -488,6 +488,22 @@ export const BannersView: React.FC<BannersViewProps> = ({
         </button>
       </div>
 
+      {/* 16:9 Banner Recommendation Notice */}
+      <div className="flex items-start sm:items-center gap-3.5 p-4 bg-red-50/80 border border-red-200 rounded-2xl shadow-xs text-xs text-red-700">
+        <div className="p-2.5 rounded-xl bg-red-600 text-white shadow-xs shrink-0 mt-0.5 sm:mt-0">
+          <Smartphone className="w-5 h-5" />
+        </div>
+        <div className="flex-1">
+          <p className="font-bold text-red-800 text-sm flex items-center gap-2">
+            <span>Chú thích tỉ lệ ảnh banner:</span>
+            <span className="px-2 py-0.5 rounded-md bg-red-600 text-white font-mono font-bold text-xs">16:9</span>
+          </p>
+          <p className="text-red-600 text-xs mt-1 leading-relaxed font-medium">
+            Để hiển thị trên điện thoại đẹp nhất, khuyến nghị sử dụng banner có <strong>tỉ lệ 16:9</strong> (Kích thước đề xuất: <span className="font-mono font-bold text-red-700">1920×1080px</span>, <span className="font-mono font-bold text-red-700">1280×720px</span> hoặc <span className="font-mono font-bold text-red-700">960×540px</span>).
+          </p>
+        </div>
+      </div>
+
       {/* Main Grid: Left = Mobile Simulator; Right = List Management */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
@@ -519,22 +535,8 @@ export const BannersView: React.FC<BannersViewProps> = ({
             </div>
 
             {/* Mobile Screen Header */}
-            <div className="flex items-center justify-between px-2 py-1 text-[11px] text-slate-400 font-medium">
-              <span className="font-bold text-white tracking-wide">GDCT VÙNG 4</span>
-              <div className="flex items-center space-x-1">
-                <span className="text-[10px]">WiFi • 100%</span>
-              </div>
-            </div>
-
-            {/* Mobile App Home Greeting */}
-            <div className="px-2 py-1.5 flex items-center justify-between">
-              <div>
-                <div className="text-[11px] text-slate-400">Xin chào,</div>
-                <div className="text-xs font-bold text-white">Thượng tá Phạm Khắc Thành</div>
-              </div>
-              <div className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-[10px] font-bold text-white border border-blue-400">
-                T
-              </div>
+            <div className="px-2 py-1.5 text-center">
+              <span className="font-bold text-white tracking-wider text-xs uppercase">GDCT VÙNG 4</span>
             </div>
 
             {/* CAROUSEL CONTAINER */}
@@ -548,9 +550,9 @@ export const BannersView: React.FC<BannersViewProps> = ({
                 </span>
               </div>
 
-              {/* Slider Viewport (Exact 2.1 : 1 Aspect Ratio) */}
+              {/* Slider Viewport (Exact 16:9 Aspect Ratio) */}
               <div 
-                className="relative overflow-hidden rounded-2xl w-full aspect-[2.1/1] shadow-lg cursor-grab active:cursor-grabbing bg-slate-950"
+                className="relative overflow-hidden rounded-2xl w-full aspect-video shadow-lg cursor-grab active:cursor-grabbing bg-slate-950"
                 onMouseDown={handleTouchStart}
                 onMouseMove={handleTouchMove}
                 onMouseUp={handleTouchEnd}
@@ -877,11 +879,16 @@ export const BannersView: React.FC<BannersViewProps> = ({
               
               {/* LIVE PREVIEW INSIDE MODAL */}
               <div>
-                <label className="block text-slate-700 font-semibold mb-1.5">
-                  Xem trước banner:
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-slate-700 font-semibold">
+                    Xem trước banner:
+                  </label>
+                  <span className="text-[11px] text-red-600 font-semibold bg-red-50 px-2 py-0.5 rounded-md border border-red-200">
+                    Khuyến nghị tỉ lệ 16:9
+                  </span>
+                </div>
                 <div 
-                  className="w-full aspect-[2.1/1] rounded-2xl relative overflow-hidden shadow-xs border border-slate-300 bg-slate-950"
+                  className="w-full aspect-video rounded-2xl relative overflow-hidden shadow-xs border border-slate-300 bg-slate-950"
                   style={{ 
                     background: (bannerMode === 'image' && formData.imageUrl) 
                       ? '#000000' 
@@ -980,6 +987,10 @@ export const BannersView: React.FC<BannersViewProps> = ({
                         </div>
                       )}
                     </div>
+                    <p className="text-[11px] text-red-600 mt-2 flex items-center gap-1.5 font-medium">
+                      <span className="font-bold">💡 Chú thích:</span>
+                      <span>Để hiển thị trên điện thoại đẹp nhất, khuyến nghị sử dụng banner có <strong>tỉ lệ 16:9</strong> (ví dụ: 1920×1080px hoặc 1280×720px).</span>
+                    </p>
                   </div>
                 </div>
               ) : (

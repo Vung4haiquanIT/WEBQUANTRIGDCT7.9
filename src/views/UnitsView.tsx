@@ -39,7 +39,7 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
   const handleOpenEdit = (u: Unit) => {
     setEditingUnit(u);
     setFormData({
-      name: u.name,
+      name: u.name || '',
       description: u.description || '',
       commander: u.commander || '',
       politicalOfficer: u.politicalOfficer || '',
@@ -63,10 +63,8 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
       } else {
         await onCreateUnit({
           name: formData.name.trim(),
-          code: `DV-${Date.now().toString().slice(-4)}`,
           type: 'BRIGADE',
           status: 'ACTIVE',
-          memberCount: 0,
           description: formData.description.trim(),
           commander: formData.commander.trim(),
           politicalOfficer: formData.politicalOfficer.trim(),
@@ -125,9 +123,9 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
               className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between"
             >
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-start justify-between gap-2 mb-2">
                   <h3 className="text-base font-bold text-slate-800 line-clamp-1">{unit.name}</h3>
-                  <div className="flex items-center space-x-1.5 text-xs text-slate-600 bg-slate-100/90 px-2.5 py-1 rounded-lg shrink-0 ml-2">
+                  <div className="flex items-center space-x-1.5 text-xs text-slate-600 bg-slate-100/90 px-2.5 py-1 rounded-lg shrink-0">
                     <Users className="w-3.5 h-3.5 text-blue-600" />
                     <span className="font-bold text-slate-800">{userCount}</span>
                     <span className="text-slate-500 text-xs">tài khoản</span>
@@ -138,7 +136,7 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
                   {unit.description || 'Đơn vị trực thuộc Bộ Tư lệnh Vùng 4 Hải Quân.'}
                 </p>
 
-                <div className="mt-4 pt-3 border-t border-slate-100 space-y-1 text-xs">
+                <div className="mt-4 pt-3 border-t border-slate-100 space-y-1.5 text-xs">
                   <div className="text-[11px] text-slate-700 flex items-center justify-between">
                     <span className="text-slate-500">Chỉ huy trưởng:</span>
                     <span className="font-semibold">{unit.commander || 'Đang cập nhật'}</span>
@@ -171,7 +169,7 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
       {/* Modal: Create/Edit Unit */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-bold text-slate-800 uppercase">
               {editingUnit ? 'Chỉnh sửa Đơn vị' : 'Thêm Đơn vị mới'}
             </h3>

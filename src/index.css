@@ -28,3 +28,31 @@ body,
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.6);
 }
+
+/* Quill Editor custom styling */
+.quill-editor-wrapper .ql-toolbar.ql-snow {
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+  border-top-left-radius: 0.75rem;
+  border-top-right-radius: 0.75rem;
+}
+
+.quill-editor-wrapper .ql-container.ql-snow {
+  border: none;
+  font-size: 0.875rem;
+  min-height: 250px;
+  cursor: text;
+}
+
+.quill-editor-wrapper .ql-editor {
+  min-height: 250px;
+  cursor: text;
+  padding: 1rem;
+}
+
+.quill-editor-wrapper .ql-editor.ql-blank::before {
+  font-style: normal;
+  color: #94a3b8;
+  left: 1rem;
+}

@@ -331,7 +331,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-            QUẢN LÝ CHUYÊN ĐỀ & BÀI HỌC GIÁO DỤC CHÍNH TRỊ
+            QUẢN LÝ CHUYÊN ĐỀ & BÀI HỌC
           </h2>
 
           <div className="flex items-center space-x-3">

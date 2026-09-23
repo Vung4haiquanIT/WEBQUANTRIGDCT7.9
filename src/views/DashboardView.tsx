@@ -58,10 +58,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const safeUsers = users || [];
   const safeProgress = progressList || [];
 
-  const publishedLessons = safeLessons.filter(l => l.status === 'PUBLISHED');
-  const draftLessons = safeLessons.filter(l => l.status === 'DRAFT');
-  const reviewLessons = safeLessons.filter(l => l.status === 'REVIEW');
-
   const isLessonMarkedCompleted = (p: UserProgress) => {
     return Boolean(
       p.completed === true || 
@@ -97,14 +93,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const completedCount = completedRecords.length;
   const uniqueCompletedUsersCount = new Set(completedRecords.map(p => p.userId || p.userName)).size;
 
-  const statusPieData = [
-    { name: 'Đã phát hành', value: publishedLessons.length, color: '#10B981' },
-    { name: 'Đang soạn thảo', value: draftLessons.length, color: '#F59E0B' },
-    { name: 'Chờ thẩm định', value: reviewLessons.length, color: '#6366F1' },
-  ];
-  const totalLessonsInPie = publishedLessons.length + draftLessons.length + reviewLessons.length;
-
-  // Collect dynamically available years from courses, progress, or current year
+  // Collect dynamically available years from courses, lessons, progress, or current year
   const availableYears = useMemo(() => {
     const yearsSet = new Set<number>();
     yearsSet.add(new Date().getFullYear()); // 2026
@@ -121,6 +110,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       }
     });
 
+    safeLessons.forEach((l) => {
+      if (l.year) {
+        const y = Number(l.year);
+        if (!isNaN(y) && y > 2000 && y < 2100) yearsSet.add(y);
+      } else if (l.courseYear) {
+        const y = Number(l.courseYear);
+        if (!isNaN(y) && y > 2000 && y < 2100) yearsSet.add(y);
+      } else if (l.createdAt) {
+        const y = new Date(l.createdAt).getFullYear();
+        if (!isNaN(y) && y > 2000 && y < 2100) yearsSet.add(y);
+      }
+    });
+
     safeProgress.forEach((p) => {
       if (p.lastAccessedAt) {
         const y = new Date(p.lastAccessedAt).getFullYear();
@@ -129,9 +131,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
 
     return Array.from(yearsSet).sort((a, b) => b - a);
-  }, [safeCourses, safeProgress]);
+  }, [safeCourses, safeLessons, safeProgress]);
 
   const [selectedYear, setSelectedYear] = useState<number | 'ALL'>(new Date().getFullYear());
+
+  // Courses filtered by selectedYear
+  const filteredCourses = useMemo(() => {
+    if (selectedYear === 'ALL') {
+      return safeCourses.filter(c => !c.isDeleted);
+    }
+    return safeCourses.filter(c => {
+      if (c.isDeleted) return false;
+      if (c.year && Number(c.year) === selectedYear) return true;
+      if (c.createdAt && new Date(c.createdAt).getFullYear() === selectedYear) return true;
+      return false;
+    });
+  }, [safeCourses, selectedYear]);
+
+  // Set of Course IDs matching selectedYear
+  const courseIdsInSelectedYear = useMemo(() => {
+    return new Set(filteredCourses.map(c => c.id));
+  }, [filteredCourses]);
+
+  // Lessons filtered by selectedYear
+  const filteredLessons = useMemo(() => {
+    if (selectedYear === 'ALL') {
+      return safeLessons.filter(l => !l.isDeleted);
+    }
+    return safeLessons.filter(l => {
+      if (l.isDeleted) return false;
+      if (l.year && Number(l.year) === selectedYear) return true;
+      if (l.courseYear && Number(l.courseYear) === selectedYear) return true;
+      if (l.courseId && courseIdsInSelectedYear.has(l.courseId)) return true;
+      if (l.createdAt && new Date(l.createdAt).getFullYear() === selectedYear) return true;
+      return false;
+    });
+  }, [safeLessons, selectedYear, courseIdsInSelectedYear]);
+
+  const publishedLessons = useMemo(() => safeLessons.filter(l => l.status === 'PUBLISHED' && !l.isDeleted), [safeLessons]);
+  const filteredPublishedLessons = useMemo(() => filteredLessons.filter(l => l.status === 'PUBLISHED'), [filteredLessons]);
+  const filteredDraftLessons = useMemo(() => filteredLessons.filter(l => l.status === 'DRAFT'), [filteredLessons]);
+  const filteredReviewLessons = useMemo(() => filteredLessons.filter(l => l.status === 'REVIEW'), [filteredLessons]);
+
+  const statusPieData = useMemo(() => [
+    { name: 'Đã phát hành', value: filteredPublishedLessons.length, color: '#10B981' },
+    { name: 'Đang soạn thảo', value: filteredDraftLessons.length, color: '#F59E0B' },
+    { name: 'Chờ thẩm định', value: filteredReviewLessons.length, color: '#6366F1' },
+  ], [filteredPublishedLessons, filteredDraftLessons, filteredReviewLessons]);
+
+  const totalLessonsInPie = filteredPublishedLessons.length + filteredDraftLessons.length + filteredReviewLessons.length;
 
   // Thống kê tiến độ theo đơn vị:
   // - Nếu trên app bài học được đánh dấu hoàn thành thì mới thống kê lên
@@ -402,7 +450,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="relative z-10 max-w-3xl">
           <div className="flex items-center space-x-2 text-amber-300 font-bold text-xs uppercase tracking-widest bg-black/20 w-fit px-3 py-1 rounded-full border border-amber-400/30 mb-3">
             <Award className="w-4 h-4 text-amber-400" />
-            <span>Hệ Thống Giáo Dục Chính Trị Năm 2026</span>
+            <span>Hệ Thống Giáo Dục Chính Trị {selectedYear === 'ALL' ? 'Tất Cả Các Năm' : `Năm ${selectedYear}`}</span>
           </div>
           <h2 className="text-2xl lg:text-3xl font-black text-white tracking-tight leading-tight uppercase">
             BẢNG ĐIỀU KHIỂN & CHỈ ĐẠO TUYÊN HUẤN
@@ -446,11 +494,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-4 flex items-baseline justify-between">
-            <span className="text-3xl font-black text-slate-900">{safeCourses.length}</span>
-            <span className="text-xs text-slate-500 font-medium">Năm 2026</span>
+            <span className="text-3xl font-black text-slate-900">{filteredCourses.length}</span>
+            <span className="text-xs text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+              {selectedYear === 'ALL' ? 'Tất cả các năm' : `Năm ${selectedYear}`}
+            </span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500 flex items-center space-x-1">
-            <span>Đang phát hành giảng dạy</span>
+            <span>{filteredCourses.filter(c => c.status === 'PUBLISHED').length} chuyên đề phát hành</span>
           </div>
         </div>
 
@@ -463,15 +513,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
           <div className="mt-4 flex items-baseline justify-between">
-            <span className="text-3xl font-black text-slate-900">{safeLessons.length}</span>
+            <span className="text-3xl font-black text-slate-900">{filteredLessons.length}</span>
             <span className="text-xs text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-              {publishedLessons.length} Phát hành
+              {filteredPublishedLessons.length} Phát hành
             </span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500 flex items-center space-x-2">
-            <span>{draftLessons.length} bản nháp</span>
+            <span>{filteredDraftLessons.length} bản nháp</span>
             <span>•</span>
-            <span>{reviewLessons.length} chờ duyệt</span>
+            <span>{filteredReviewLessons.length} chờ duyệt</span>
           </div>
         </div>
 
@@ -490,7 +540,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <span className="text-3xl font-black text-amber-600">
               {Number(regionProgressStats.rate).toFixed(2)}%
             </span>
-            <span className="text-xs text-slate-500 font-medium">Toàn Vùng 4</span>
+            <span className="text-xs text-amber-800 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+              {selectedYear === 'ALL' ? 'Tất cả các năm' : `Năm ${selectedYear}`}
+            </span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
             {regionProgressStats.soldiersWithAnyCompletion} chiến sĩ đạt chuẩn ({regionProgressStats.totalCompletedLessonsCount}/{regionProgressStats.totalExpectedCompletions} lượt bài học)
@@ -507,7 +559,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="mt-4 flex items-baseline justify-between">
             <span className="text-3xl font-black text-slate-900">{safeUnits.length}</span>
-            <span className="text-xs text-slate-500 font-medium">Đơn vị</span>
+            <span className="text-xs text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">Đơn vị</span>
           </div>
           <div className="mt-2 text-[11px] text-slate-500">
             {safeUsers.length} tài khoản người dùng
@@ -582,10 +634,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Right 1 Col: Lesson Status Pie */}
         <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
           <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-1">
-              Phân bổ Trạng thái Bài học
-            </h3>
-            <p className="text-xs text-slate-500">Tình trạng biên soạn và thẩm định</p>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                Phân bổ Trạng thái Bài học
+              </h3>
+              <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                {selectedYear === 'ALL' ? 'Tất cả năm' : `Năm ${selectedYear}`}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">Tình trạng biên soạn và thẩm định theo năm</p>
           </div>
 
           <div className="h-44 min-h-[176px] w-full my-auto flex items-center justify-center">
@@ -649,19 +706,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={goToCourses}
               className="text-xs text-blue-600 hover:text-blue-700 font-semibold"
             >
-              Xem tất cả ({safeLessons.length})
+              Xem tất cả ({filteredLessons.length})
             </button>
           </div>
 
           <div className="space-y-3">
-            {safeLessons.length === 0 ? (
+            {filteredLessons.length === 0 ? (
               <div className="text-center py-8 text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
                 <BookOpen className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                <p className="text-xs font-semibold text-slate-500">Chưa có bài học nào trong hệ thống</p>
+                <p className="text-xs font-semibold text-slate-500">
+                  Chưa có bài học nào {selectedYear === 'ALL' ? 'trong hệ thống' : `trong năm ${selectedYear}`}
+                </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">Tạo chuyên đề và bài học mới để phát hành lên ứng dụng</p>
               </div>
             ) : (
-              safeLessons.slice(0, 3).map((lesson) => (
+              filteredLessons.slice(0, 3).map((lesson) => (
                 <div
                   key={lesson.id}
                   onClick={() => selectLesson(lesson)}

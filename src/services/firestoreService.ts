@@ -48,6 +48,7 @@ import {
   ExamSession,
   ExamSubmission,
   UserFeedback,
+  FeedbackType,
   FeedbackStatus,
   RadioBroadcast
 } from '../types';
@@ -99,6 +100,328 @@ export function getSafeTimestamp(val: any): number {
     return val.getTime();
   }
   return 0;
+}
+
+// Helper to identify whether a submission/contest record is an official exam (đợt thi chính thức)
+// and strictly exclude random exams, practice tests, and lesson quiz assessments (đợt thi ngẫu nhiên và ôn luyện)
+export function isOfficialExamRecord(raw: any, docId?: string): boolean {
+  if (!raw) return false;
+
+  // 1. Exclude simulator, dummy, sample documents
+  if (docId && (
+    docId.startsWith('sub-init-') ||
+    docId.startsWith('sub-sample-') ||
+    docId.startsWith('sub-seed-') ||
+    docId.startsWith('sub-sync-') ||
+    docId.startsWith('sim-') ||
+    docId.startsWith('sub-sim-')
+  )) {
+    return false;
+  }
+
+  if (raw.isSimulator === true || raw.userId?.startsWith('user-sim-') || (raw.sessionId === 'session-default' && !raw.isOfficial)) {
+    return false;
+  }
+
+  // 2. Exclude random practice exams, quizzes, training sessions (đợt thi ngẫu nhiên và ôn luyện)
+  const type = String(raw.type || raw.examType || '').toLowerCase();
+  const loaiBaiThi = String(raw.loaiBaiThi || '').toLowerCase();
+  if (
+    type === 'exam_quiz' ||
+    type === 'practice' ||
+    type === 'random' ||
+    type === 'on_luyen' ||
+    type === 'lesson_quiz' ||
+    type === 'quiz' ||
+    loaiBaiThi === 'on_luyen' ||
+    loaiBaiThi === 'ngau_nhien' ||
+    loaiBaiThi === 'luyen_tap' ||
+    loaiBaiThi === 'tu_luyen' ||
+    raw.isOfficial === false ||
+    raw.chinhThuc === false
+  ) {
+    return false;
+  }
+
+  const sessId = String(raw.dotThiId || raw.examSessionId || raw.examId || raw.sessionId || '');
+  if (
+    sessId.startsWith('random_practice_') ||
+    sessId.startsWith('practice_') ||
+    sessId.startsWith('random_') ||
+    sessId === 'session-default'
+  ) {
+    return false;
+  }
+
+  const title = String(raw.tenDotThi || raw.tenBaiThi || raw.examName || raw.sessionTitle || '').toLowerCase();
+  if (
+    title.includes('ngẫu nhiên') ||
+    title.includes('ôn luyện') ||
+    title.includes('luyện tập') ||
+    title.includes('tự luyện')
+  ) {
+    return false;
+  }
+
+  // 3. Positive official validation:
+  if (
+    raw.isOfficial === true ||
+    raw.chinhThuc === true ||
+    loaiBaiThi === 'chinh_thuc' ||
+    type === 'official'
+  ) {
+    return true;
+  }
+
+  // If associated with a real exam session ID and not practice/random
+  if (sessId.startsWith('session-') || (sessId && !sessId.includes('practice') && !sessId.includes('random'))) {
+    return true;
+  }
+
+  return false;
+}
+
+// Maps raw documents from 'ket_qua_thi' or 'exam_submissions' into typed ExamSubmission
+export function mapExamDocToSubmission(
+  d: { id: string; data: () => any },
+  userMap?: Map<string, User>
+): ExamSubmission | null {
+  const raw = d.data();
+  if (!isOfficialExamRecord(raw, d.id)) {
+    return null;
+  }
+
+  const sessionId = raw.dotThiId || raw.examSessionId || raw.examId || raw.sessionId || '';
+  const sessionTitle = raw.tenDotThi || raw.tenBaiThi || raw.examName || raw.sessionTitle || 'Đợt thi chính thức';
+  const userId = raw.userId || raw.user_id || raw.nguoiDungId || '';
+
+  const matchedUser = userMap?.get(userId) || 
+    (raw.userName && userMap?.get(String(raw.userName).trim())) || 
+    (raw.hoTen && userMap?.get(String(raw.hoTen).trim())) ||
+    (raw.email && userMap?.get(String(raw.email).trim()));
+
+  const userName = matchedUser?.fullName || matchedUser?.name || raw.hoTen || raw.userName || raw.name || 'Quân nhân';
+  const userRank = matchedUser?.rank || raw.capBac || raw.userRank || raw.rank || '—';
+  const userPosition = matchedUser?.position || raw.chucVu || raw.userPosition || raw.position || '—';
+  const unitName = matchedUser?.unitName || matchedUser?.unit || raw.donVi || raw.userUnit || raw.unit || raw.unitName || 'Chưa xếp đơn vị';
+
+  const totalQuestions = Number(raw.tongSoCau ?? raw.totalQuestions ?? raw.soCauHoi ?? 20);
+  const correctCount = Number(raw.soCauDung ?? raw.correctCount ?? 0);
+
+  // Score calculation:
+  // Thang điểm 10 chuẩn Quân đội (8.0-10: Giỏi, 6.5-7.9: Khá, 5.0-6.4: Đạt, <5: Chưa đạt)
+  let score = 0;
+  if (raw.phanTramDiem !== undefined && !isNaN(Number(raw.phanTramDiem))) {
+    score = Number((Number(raw.phanTramDiem) / 10).toFixed(1));
+  } else if (raw.scorePercentage !== undefined && !isNaN(Number(raw.scorePercentage))) {
+    score = Number((Number(raw.scorePercentage) / 10).toFixed(1));
+  } else if (totalQuestions > 0 && correctCount >= 0) {
+    score = Number(((correctCount / totalQuestions) * 10).toFixed(1));
+  } else if (raw.score !== undefined || raw.diem !== undefined) {
+    const rawScore = Number(raw.score ?? raw.diem ?? 0);
+    if (totalQuestions > 10 && rawScore <= totalQuestions) {
+      score = Number(((rawScore / totalQuestions) * 10).toFixed(1));
+    } else {
+      score = Number(rawScore.toFixed(1));
+    }
+  }
+
+  let passed = false;
+  if (raw.passed !== undefined) {
+    passed = Boolean(raw.passed);
+  } else if (raw.dat !== undefined) {
+    passed = Boolean(raw.dat);
+  } else {
+    passed = score >= 5.0;
+  }
+
+  let submittedAt = new Date().toISOString();
+  const rawTime = raw.thoiGianNop ?? raw.timestamp ?? raw.createdAt ?? raw.submittedAt;
+  if (rawTime) {
+    if (typeof rawTime === 'number') {
+      submittedAt = new Date(rawTime).toISOString();
+    } else if (typeof rawTime === 'string') {
+      submittedAt = rawTime;
+    } else if (rawTime.toDate && typeof rawTime.toDate === 'function') {
+      submittedAt = rawTime.toDate().toISOString();
+    }
+  }
+
+  const timeSpentSeconds = Number(raw.thoiGianLamBai ?? raw.timeSpentSeconds ?? 0);
+
+  return {
+    id: d.id,
+    sessionId,
+    sessionTitle,
+    userId,
+    userName,
+    userRank,
+    userPosition,
+    unitName,
+    score,
+    correctCount,
+    totalQuestions,
+    passed,
+    timeSpentSeconds,
+    answers: raw.answers || [],
+    submittedAt
+  };
+}
+
+// Normalizes raw feedback documents from either 'feedbacks' or 'user_feedbacks'
+// Safely extracts all attached images (Base64 or Cloud URLs) and metadata
+export function normalizeFeedbackDoc(id: string, data: any): UserFeedback {
+  if (!data) {
+    return {
+      id,
+      userId: '',
+      userName: 'Quân nhân',
+      unitName: 'Vùng 4 Hải Quân',
+      type: 'OTHER',
+      title: 'Góp ý phản ánh',
+      content: '',
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  // Extract all attached images safely from any possible format
+  const rawImages: string[] = [];
+
+  // 1. Array sources (mobile app can save to images, imageUrls, attachedImages, danhSachHinhAnh, hinhAnh, attachments, etc.)
+  const arraySources = [
+    data.imageUrls,
+    data.images,
+    data.attachedImages,
+    data.danhSachHinhAnh,
+    data.hinhAnh,
+    data.attachments,
+    data.files
+  ];
+
+  for (const arr of arraySources) {
+    if (Array.isArray(arr)) {
+      for (const item of arr) {
+        if (typeof item === 'string' && item.trim()) {
+          rawImages.push(item.trim());
+        } else if (item && typeof item === 'object') {
+          const u = item.url || item.downloadUrl || item.imageUrl || item.src || item.uri || item.path || item.base64;
+          if (typeof u === 'string' && u.trim()) {
+            rawImages.push(u.trim());
+          }
+        }
+      }
+    }
+  }
+
+  // 2. String sources
+  const stringSources = [
+    data.imageUrl,
+    data.image,
+    typeof data.hinhAnh === 'string' ? data.hinhAnh : undefined,
+    data.fileUrl,
+    data.attachmentUrl
+  ];
+
+  for (const s of stringSources) {
+    if (typeof s === 'string' && s.trim()) {
+      rawImages.push(s.trim());
+    }
+  }
+
+  // Deduplicate images while maintaining order
+  const uniqueImages: string[] = [];
+  for (const img of rawImages) {
+    if (!uniqueImages.includes(img)) {
+      uniqueImages.push(img);
+    }
+  }
+
+  // Determine createdAt ISO string
+  let createdAt = data.createdAt;
+  if (typeof createdAt === 'number') {
+    createdAt = new Date(createdAt).toISOString();
+  } else if (!createdAt && data.timestamp) {
+    createdAt = typeof data.timestamp === 'number' ? new Date(data.timestamp).toISOString() : String(data.timestamp);
+  } else if (!createdAt) {
+    createdAt = new Date().toISOString();
+  }
+
+  let updatedAt = data.updatedAt;
+  if (typeof updatedAt === 'number') {
+    updatedAt = new Date(updatedAt).toISOString();
+  } else if (!updatedAt && data.updatedAtTimestamp) {
+    updatedAt = new Date(data.updatedAtTimestamp).toISOString();
+  } else if (!updatedAt) {
+    updatedAt = createdAt;
+  }
+
+  // Type normalization
+  let type: FeedbackType = data.type || 'OTHER';
+  const typeStr = String(type);
+  if (typeStr === 'Góp ý chung' || typeStr === 'APP_SUGGESTION' || typeStr === 'Ý kiến góp ý') {
+    type = 'APP_SUGGESTION';
+  } else if (typeStr === 'QUESTION_ERROR' || typeStr.includes('câu hỏi')) {
+    type = 'QUESTION_ERROR';
+  } else if (typeStr === 'EXAM_ERROR' || typeStr.includes('đợt thi') || typeStr.includes('đề thi')) {
+    type = 'EXAM_ERROR';
+  } else if (typeStr === 'GDCT_CONTENT' || typeStr.includes('bài học') || typeStr.includes('chuyên đề')) {
+    type = 'GDCT_CONTENT';
+  }
+
+  // Status normalization
+  let status: FeedbackStatus = data.status || 'PENDING';
+  const stLower = String(data.status || '').toLowerCase();
+  if (stLower === 'pending' || stLower === 'cho_xu_ly') status = 'PENDING';
+  else if (stLower === 'received' || stLower === 'da_tiep_nhan') status = 'RECEIVED';
+  else if (stLower === 'processing' || stLower === 'dang_xu_ly') status = 'PROCESSING';
+  else if (stLower === 'resolved' || stLower === 'da_xu_ly' || data.isResolved || data.daXuLy) status = 'RESOLVED';
+
+  // Admin response normalization
+  const adminResp = data.adminResponse || data.response || data.reply || data.adminReply || data.feedbackResponse || data.feedbackReply || data.traLoi || data.phanHoi || '';
+  const respBy = data.respondedBy || data.replyBy || data.nguoiTraLoi || '';
+  const respAt = data.respondedAt || (data.respondedAtTimestamp ? new Date(data.respondedAtTimestamp).toISOString() : '');
+
+  // Responses array
+  const responses = Array.isArray(data.responses) && data.responses.length > 0 
+    ? data.responses 
+    : Array.isArray(data.replies) && data.replies.length > 0
+      ? data.replies
+      : adminResp 
+        ? [{ id: 'init-r', content: adminResp, respondedBy: respBy || 'Ban Quản Trị', respondedAt: respAt || updatedAt }]
+        : [];
+
+  return {
+    id,
+    userId: data.userId || data.user_id || data.uid || '',
+    userName: data.userName || data.name || data.fullName || 'Quân nhân',
+    userRank: data.userRank || data.rank || '',
+    userPosition: data.userPosition || data.position || '',
+    unitName: data.unitName || data.unit || data.donVi || 'Vùng 4 Hải Quân',
+    type,
+    title: data.title || (uniqueImages.length > 0 ? 'Góp ý có đính kèm hình ảnh' : 'Góp ý phản ánh'),
+    content: data.content || data.feedback || data.noiDung || '',
+    relatedExamTitle: data.relatedExamTitle || '',
+    relatedQuestionText: data.relatedQuestionText || '',
+    status,
+    adminResponse: adminResp,
+    respondedBy: respBy,
+    respondedAt: respAt,
+    responses,
+    replies: responses,
+    images: uniqueImages,
+    imageUrls: uniqueImages,
+    imageUrl: uniqueImages[0] || undefined,
+    image: uniqueImages[0] || undefined,
+    attachedImages: uniqueImages,
+    danhSachHinhAnh: uniqueImages,
+    hinhAnh: uniqueImages,
+    hasAttachment: uniqueImages.length > 0 || !!data.hasAttachment,
+    attachmentCount: uniqueImages.length || data.attachmentCount || 0,
+    createdAt,
+    updatedAt
+  };
 }
 
 export const firestoreService = {
@@ -1688,21 +2011,157 @@ export const firestoreService = {
     });
   },
 
-  getUserPersonalCloudData: async (userId: string) => {
+  getUserPersonalCloudData: async (userId: string, userObj?: Partial<User>) => {
     try {
-      const [progSnap, subSnap, fbSnap, secSnap] = await Promise.all([
-        getDocs(query(collection(db, 'progress'), where('userId', '==', userId))),
-        getDocs(query(collection(db, 'exam_submissions'), where('userId', '==', userId))),
-        getDocs(query(collection(db, 'user_feedbacks'), where('userId', '==', userId))),
-        getDocs(query(collection(db, 'userSectionProgress'), where('userId', '==', userId)))
-      ]);
+      // 1. Resolve user info for comprehensive matching (by ID, email, or full name)
+      let targetUser = userObj;
+      if (!targetUser && userId) {
+        try {
+          const uDoc = await getDoc(doc(db, 'users', userId));
+          if (uDoc.exists()) {
+            targetUser = { ...(uDoc.data() as any), id: uDoc.id } as User;
+          }
+        } catch (_) {}
+      }
 
-      const progressList = progSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserProgress);
-      const examSubmissions = subSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as ExamSubmission)
-        .sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
-      const feedbacks = fbSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserFeedback)
-        .sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
-      const sectionProgressList = secSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserSectionProgress);
+      const targetId = (userId || targetUser?.id || '').trim();
+      const targetEmail = (targetUser?.email || '').trim().toLowerCase();
+      const targetFullName = (targetUser?.fullName || targetUser?.name || '').trim().toLowerCase();
+
+      // Helper to parse date / timestamp to ISO string
+      const extractDateIso = (raw: any): string | undefined => {
+        if (!raw) return undefined;
+        if (typeof raw.toDate === 'function') {
+          try { return raw.toDate().toISOString(); } catch (_) {}
+        }
+        if (typeof raw.seconds === 'number') {
+          return new Date(raw.seconds * 1000).toISOString();
+        }
+        if (typeof raw === 'number' && !isNaN(raw) && raw > 0) {
+          const d = new Date(raw);
+          if (!isNaN(d.getTime())) return d.toISOString();
+        }
+        if (typeof raw === 'string' && raw.trim()) {
+          const d = new Date(raw);
+          if (!isNaN(d.getTime())) return d.toISOString();
+          const n = Number(raw);
+          if (!isNaN(n) && n > 0) {
+            const nd = new Date(n);
+            if (!isNaN(nd.getTime())) return nd.toISOString();
+          }
+        }
+        return undefined;
+      };
+
+      // 2. Fetch Progress records
+      let progDocs: any[] = [];
+      try {
+        const progSnap = await getDocs(collection(db, 'progress'));
+        progDocs = progSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (err) {
+        console.warn('[getUserPersonalCloudData progSnap error]:', err);
+      }
+
+      // Filter and normalize progress records for this user
+      const userProgDocs = progDocs.filter((data: any) => {
+        const pUserId = String(data.userId || data.user_id || data.nguoiDungId || '').trim();
+        if (targetId && pUserId === targetId) return true;
+        const pEmail = String(data.email || data.userEmail || '').trim().toLowerCase();
+        if (targetEmail && pEmail && pEmail === targetEmail) return true;
+        const pName = String(data.userName || data.name || data.hoTen || '').trim().toLowerCase();
+        if (targetFullName && pName && pName === targetFullName) return true;
+        return false;
+      });
+
+      const progressList: UserProgress[] = userProgDocs.map((data: any) => {
+        const isCompl = data.completed !== undefined 
+          ? Boolean(data.completed) 
+          : Boolean(data.hoanThanh || data.isCompleted || data.daDat);
+        const sProg = typeof data.slideProgress === 'number' ? data.slideProgress : 0;
+        const cProg = typeof data.contentProgress === 'number' ? data.contentProgress : 0;
+        const vProg = typeof data.videoProgress === 'number' ? data.videoProgress : 0;
+        const aProg = typeof data.audioProgress === 'number' ? data.audioProgress : 0;
+
+        let overall = typeof data.overallProgress === 'number' 
+          ? data.overallProgress 
+          : typeof data.progress === 'number'
+          ? data.progress
+          : (typeof data.scorePercentage === 'number' ? data.scorePercentage : (typeof data.phanTramDiem === 'number' ? data.phanTramDiem : 0));
+
+        if (!overall && isCompl) {
+          overall = 100;
+        } else if (!overall) {
+          overall = Math.max(sProg, cProg, vProg, aProg);
+        }
+
+        const rawTime = data.lastAccessedAt || 
+                        data.updatedAt || 
+                        data.completedAt || 
+                        data.thoiGianHoanThanh || 
+                        data.thoiGian || 
+                        data.timestamp || 
+                        data.createdAt;
+        const isoTime = extractDateIso(rawTime) || (isCompl ? new Date().toISOString() : undefined);
+
+        return {
+          id: data.id,
+          userId: data.userId || targetId,
+          userName: data.userName || targetUser?.fullName || targetUser?.name || 'Quân nhân',
+          unitId: data.unitId || targetUser?.unitId || '',
+          unitName: data.unitName || targetUser?.unitName || targetUser?.unit || 'Đơn vị',
+          lessonId: data.lessonId || data.lesson_id || data.baiHocId || '',
+          lessonTitle: data.lessonTitle || data.tenBaiHoc || 'Bài học',
+          courseId: data.courseId || data.course_id || '',
+          slideProgress: sProg,
+          videoProgress: vProg,
+          audioProgress: aProg,
+          contentProgress: cProg,
+          overallProgress: overall,
+          completed: isCompl || overall >= 100,
+          lastAccessedAt: isoTime || '',
+          completedAt: data.completedAt || (isCompl ? isoTime : undefined),
+          version: data.version || 1
+        } as UserProgress;
+      });
+
+      // 3. Fetch Exam Submissions (from BOTH ket_qua_thi and exam_submissions)
+      let examSubmissions: ExamSubmission[] = [];
+      try {
+        const allSubs = await firestoreService.getExamSubmissions();
+        examSubmissions = allSubs.filter(sub => {
+          if (targetId && sub.userId && sub.userId === targetId) return true;
+          const subEmail = String((sub as any).email || (sub as any).userEmail || '').trim().toLowerCase();
+          if (targetEmail && subEmail && subEmail === targetEmail) return true;
+          const subName = String(sub.userName || '').trim().toLowerCase();
+          if (targetFullName && subName && subName === targetFullName) return true;
+          return false;
+        });
+      } catch (err) {
+        console.warn('[getUserPersonalCloudData getExamSubmissions error]:', err);
+      }
+
+      // 4. Fetch User Feedbacks (from BOTH feedbacks and user_feedbacks)
+      let feedbacks: UserFeedback[] = [];
+      try {
+        const allFeedbacks = await firestoreService.getFeedbacks();
+        feedbacks = allFeedbacks.filter(fb => {
+          if (targetId && fb.userId && fb.userId === targetId) return true;
+          const fbEmail = String((fb as any).email || (fb as any).userEmail || '').trim().toLowerCase();
+          if (targetEmail && fbEmail && fbEmail === targetEmail) return true;
+          const fbName = String(fb.userName || '').trim().toLowerCase();
+          if (targetFullName && fbName && fbName === targetFullName) return true;
+          return false;
+        });
+      } catch (err) {
+        console.warn('[getUserPersonalCloudData getFeedbacks error]:', err);
+      }
+
+      // 5. Fetch userSectionProgress
+      let sectionProgressList: UserSectionProgress[] = [];
+      try {
+        const secSnap = await getDocs(query(collection(db, 'userSectionProgress'), where('userId', '==', targetId)));
+        sectionProgressList = secSnap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserSectionProgress);
+      } catch (_) {}
 
       return {
         progressList,
@@ -2058,7 +2517,9 @@ export const firestoreService = {
     const colRef = collection(db, 'notifications');
     const q = query(colRef, orderBy('createdAt', 'desc'), limit(maxLimit));
     const snap = await getDocs(q);
-    return snap.docs.map(d => d.data() as SystemNotification);
+    return snap.docs
+      .map(d => d.data() as SystemNotification)
+      .filter((n: any) => !n.feedbackId && !n.id?.startsWith('notif-fb-') && !n.isPersonal && n.type !== 'FEEDBACK_RESPONSE');
   },
 
   createNotification: async (data: Partial<SystemNotification>): Promise<SystemNotification> => {
@@ -3430,8 +3891,10 @@ export const firestoreService = {
         d.id.startsWith('sub-init-') || 
         d.id.startsWith('sub-sample-') || 
         d.id.startsWith('sub-seed-') ||
+        d.id.startsWith('sub-sync-') ||
         d.id.startsWith('sim-') ||
         d.id.startsWith('sub-sim-') ||
+        (d.data() as any).sessionId === 'session-default' ||
         (d.data() as any).isSimulator === true ||
         (d.data() as any).userId?.startsWith('user-sim-')
       );
@@ -3446,168 +3909,15 @@ export const firestoreService = {
   },
 
   syncLegacyUserSubmissions: async (): Promise<void> => {
-    try {
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const subsSnap = await getDocs(collection(db, 'exam_submissions'));
-      const sessionsSnap = await getDocs(collection(db, 'exam_sessions')).catch(() => null);
-      
-      const sessionsList = sessionsSnap 
-        ? sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))
-        : [];
-
-      const getSessionTimestamp = (s: any) => {
-        if (s.createdAt) {
-          const t = typeof s.createdAt === 'number' ? s.createdAt : new Date(s.createdAt).getTime();
-          if (!isNaN(t)) return t;
-        }
-        const match = s.id.match(/\d+/);
-        if (match) {
-          return parseInt(match[0]);
-        }
-        return 0;
-      };
-
-      const existingSubsMap = new Map<string, any>();
-      subsSnap.docs.forEach(d => {
-        const s = d.data();
-        if (s.userId) {
-          existingSubsMap.set(s.userId, { id: d.id, ...s });
-        }
-      });
-
-      const batch = writeBatch(db);
-      let batchCount = 0;
-
-      usersSnap.docs.forEach(d => {
-        const u = { ...(d.data() as any), id: d.id } as User;
-        
-        // Check if user has exam results
-        const hasExamStats = 
-          (u as any).totalExamsCount > 0 || 
-          (u as any).lastExamScore !== undefined || 
-          (u as any).lastScore !== undefined ||
-          (u as any).lastExamTime !== undefined;
-
-        if (hasExamStats) {
-          const existingSub = existingSubsMap.get(u.id);
-          
-          let score = 0;
-          let totalQuestions = 10;
-          let correctCount = 0;
-          
-          if ((u as any).lastExamScore !== undefined) {
-            totalQuestions = (u as any).lastExamTotal || 10;
-            correctCount = Number((u as any).lastExamScore || 0);
-            score = totalQuestions > 0 ? (correctCount / totalQuestions) * 10 : correctCount;
-          } else if ((u as any).lastScore !== undefined) {
-            totalQuestions = 10;
-            const percentage = (u as any).lastScorePercentage || 0;
-            score = percentage > 0 ? (percentage / 10) : Number((u as any).lastScore || 0);
-            correctCount = Math.round((score / 10) * totalQuestions);
-          }
-
-          const passed = (u as any).lastExamPassed !== undefined 
-            ? (u as any).lastExamPassed 
-            : (score >= 5.0);
-
-          let submittedAt = new Date().toISOString();
-          const examTimeNum = (u as any).lastExamTime;
-          if (examTimeNum) {
-            submittedAt = new Date(examTimeNum).toISOString();
-          } else if (u.updatedAt) {
-            submittedAt = typeof u.updatedAt === 'string' ? u.updatedAt : new Date(u.updatedAt).toISOString();
-          } else if (u.createdAt) {
-            submittedAt = typeof u.createdAt === 'string' ? u.createdAt : new Date(u.createdAt).toISOString();
-          }
-
-          // Resolve which session/lesson this exam belongs to
-          let resolvedSessionId = (u as any).lastLessonId || 'session-default';
-          let resolvedSessionTitle = (u as any).lastLessonTitle || 'Kiểm tra nhận thức';
-
-          if (examTimeNum && sessionsList.length > 0) {
-            // Find session created before or very close to examTime
-            const candidates = sessionsList.filter(s => {
-              const sTime = getSessionTimestamp(s);
-              return sTime <= examTimeNum + 60000;
-            });
-
-            if (candidates.length > 0) {
-              candidates.sort((a, b) => getSessionTimestamp(b) - getSessionTimestamp(a));
-              const bestSession = candidates[0];
-              resolvedSessionId = bestSession.id;
-              resolvedSessionTitle = bestSession.title || 'Đợt kiểm tra';
-            }
-          }
-
-          // Determine if we should create or update the synced submission
-          const shouldUpdate = !existingSub || 
-            existingSub.submittedAt !== submittedAt || 
-            existingSub.score !== Number(score.toFixed(1)) ||
-            existingSub.sessionId !== resolvedSessionId;
-
-          if (shouldUpdate) {
-            const id = `sub-sync-${u.id}`;
-            const submissionPayload = {
-              id,
-              sessionId: resolvedSessionId,
-              sessionTitle: resolvedSessionTitle,
-              userId: u.id,
-              userName: u.fullName || u.name || 'Quân nhân',
-              userRank: u.rank || '—',
-              userPosition: u.position || '—',
-              unitName: u.unitName || u.unit || 'Chưa xếp đơn vị',
-              score: Number(score.toFixed(1)),
-              correctCount,
-              totalQuestions,
-              passed,
-              timeSpentSeconds: 600, // Default to 10 mins if not tracked
-              answers: [],
-              submittedAt
-            };
-
-            const docRef = doc(db, 'exam_submissions', id);
-            batch.set(docRef, submissionPayload, { merge: true });
-            batchCount++;
-          }
-        }
-      });
-
-      if (batchCount > 0) {
-        console.log(`[syncLegacyUserSubmissions]: Auto-syncing/updating ${batchCount} user exam submissions to Firestore...`);
-        await batch.commit();
-      }
-    } catch (err) {
-      console.warn('[syncLegacyUserSubmissions error]:', err);
-    }
+    // Deprecated: Báo cáo kết quả kiểm tra chỉ lấy từ kết quả các đợt thi trực tuyến thực tế,
+    // không lấy từ câu hỏi kiểm tra đánh giá bài học.
+    return Promise.resolve();
   },
 
   getExamSubmissions: async (sessionId?: string): Promise<ExamSubmission[]> => {
     try {
-      // Sync legacy user submissions in background
-      await firestoreService.syncLegacyUserSubmissions().catch(() => {});
-      
-      // Clean up legacy sample submissions to ensure only real submissions are used
+      // Clean up legacy sample submissions & lesson-quiz syncs to ensure only real exam submissions are used
       await firestoreService.cleanSampleSubmissionsIfNeeded().catch(() => {});
-
-      const colRef = collection(db, 'exam_submissions');
-      let q;
-      if (sessionId && sessionId !== 'ALL') {
-        q = query(colRef, where('sessionId', '==', sessionId));
-      } else {
-        q = query(colRef);
-      }
-      const snap = await getDocs(q);
-
-      // Filter out any lingering sample or test simulator docs
-      const realDocs = snap.docs.filter(d => 
-        !d.id.startsWith('sub-init-') && 
-        !d.id.startsWith('sub-sample-') && 
-        !d.id.startsWith('sub-seed-') &&
-        !d.id.startsWith('sim-') &&
-        !d.id.startsWith('sub-sim-') &&
-        !(d.data() as any).isSimulator &&
-        !(d.data() as any).userId?.startsWith('user-sim-')
-      );
 
       // Fetch registered users from Firestore to dynamically enrich submission records
       const userSnap = await getDocs(collection(db, 'users')).catch(() => null);
@@ -3616,24 +3926,52 @@ export const firestoreService = {
         userSnap.docs.forEach(d => {
           const u = { ...(d.data() as any), id: d.id } as User;
           userMap.set(u.id, u);
-          if (u.fullName) userMap.set(u.fullName, u);
-          if (u.name) userMap.set(u.name, u);
+          if (u.fullName) userMap.set(u.fullName.trim(), u);
+          if (u.name) userMap.set(u.name.trim(), u);
+          if (u.email) userMap.set(u.email.trim(), u);
         });
       }
 
-      const subs = realDocs.map(d => {
-        const data = d.data() as ExamSubmission;
-        const matchedUser = userMap.get(data.userId) || userMap.get(data.userName);
-        return {
-          ...data,
-          id: d.id,
-          userName: matchedUser?.fullName || matchedUser?.name || data.userName,
-          userRank: matchedUser?.rank || data.userRank,
-          userPosition: matchedUser?.position || data.userPosition,
-          unitName: matchedUser?.unitName || matchedUser?.unit || data.unitName,
-        } as ExamSubmission;
-      });
+      const resultMap = new Map<string, ExamSubmission>();
 
+      // 1. Fetch from 'ket_qua_thi' (Primary competition and exam collection from App)
+      try {
+        const ketQuaSnap = await getDocs(collection(db, 'ket_qua_thi'));
+        ketQuaSnap.docs.forEach(d => {
+          const sub = mapExamDocToSubmission(d, userMap);
+          if (sub) {
+            if (!sessionId || sessionId === 'ALL' || sub.sessionId === sessionId || sub.sessionTitle === sessionId) {
+              resultMap.set(sub.id, sub);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('[getExamSubmissions from ket_qua_thi error]:', err);
+      }
+
+      // 2. Fetch from 'exam_submissions'
+      try {
+        const colRef = collection(db, 'exam_submissions');
+        let q;
+        if (sessionId && sessionId !== 'ALL') {
+          q = query(colRef, where('sessionId', '==', sessionId));
+        } else {
+          q = query(colRef);
+        }
+        const examSnap = await getDocs(q);
+        examSnap.docs.forEach(d => {
+          if (!resultMap.has(d.id)) {
+            const sub = mapExamDocToSubmission(d, userMap);
+            if (sub) {
+              resultMap.set(sub.id, sub);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('[getExamSubmissions from exam_submissions error]:', err);
+      }
+
+      const subs = Array.from(resultMap.values());
       return subs.sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
     } catch (err) {
       console.warn('[getExamSubmissions error]:', err);
@@ -3689,64 +4027,112 @@ export const firestoreService = {
 
     const cleanSubmission = sanitizeFirestoreData(fullSubmission);
     await setDoc(doc(db, 'exam_submissions', id), cleanSubmission);
+
+    // Also persist into ket_qua_thi marked as official exam
+    try {
+      const ketQuaDoc = {
+        ...cleanSubmission,
+        dotThiId: fullSubmission.sessionId,
+        tenDotThi: fullSubmission.sessionTitle,
+        tenBaiThi: fullSubmission.sessionTitle,
+        examSessionId: fullSubmission.sessionId,
+        examName: fullSubmission.sessionTitle,
+        hoTen: fullSubmission.userName,
+        capBac: fullSubmission.userRank,
+        donVi: fullSubmission.unitName,
+        userUnit: fullSubmission.unitName,
+        diem: fullSubmission.correctCount,
+        soCauDung: fullSubmission.correctCount,
+        tongSoCau: fullSubmission.totalQuestions,
+        soCauHoi: fullSubmission.totalQuestions,
+        phanTramDiem: fullSubmission.totalQuestions > 0 ? Math.round((fullSubmission.correctCount / fullSubmission.totalQuestions) * 100) : 0,
+        thoiGianLamBai: fullSubmission.timeSpentSeconds,
+        thoiGianNop: Date.now(),
+        loaiBaiThi: 'chinh_thuc',
+        type: 'official',
+        isOfficial: true,
+        chinhThuc: true,
+        dat: fullSubmission.passed
+      };
+      await setDoc(doc(db, 'ket_qua_thi', id), sanitizeFirestoreData(ketQuaDoc));
+    } catch (e) {
+      console.warn('[submitExamResult to ket_qua_thi warning]:', e);
+    }
+
     await setDoc(doc(db, 'system_meta', 'init_flags'), { examSubmissionsSeeded: true }, { merge: true });
     return fullSubmission;
   },
 
   listenExamSubmissions: (sessionId: string | undefined, callback: (subs: ExamSubmission[]) => void) => {
-    // Run self-healing legacy user profile submissions synchronization in the background
-    firestoreService.syncLegacyUserSubmissions().catch(() => {});
+    let ketQuaDocs: ExamSubmission[] = [];
+    let examSubDocs: ExamSubmission[] = [];
+    let userMap = new Map<string, User>();
 
-    const colRef = collection(db, 'exam_submissions');
-    let q;
-    if (sessionId && sessionId !== 'ALL') {
-      q = query(colRef, where('sessionId', '==', sessionId));
-    } else {
-      q = query(colRef);
-    }
-    return onSnapshot(q, async (snapshot) => {
-      let userMap = new Map<string, User>();
+    const refreshUsers = async () => {
       try {
         const userSnap = await getDocs(collection(db, 'users'));
         userSnap.docs.forEach(d => {
           const u = { ...(d.data() as any), id: d.id } as User;
           userMap.set(u.id, u);
-          if (u.fullName) userMap.set(u.fullName, u);
-          if (u.name) userMap.set(u.name, u);
+          if (u.fullName) userMap.set(u.fullName.trim(), u);
+          if (u.name) userMap.set(u.name.trim(), u);
+          if (u.email) userMap.set(u.email.trim(), u);
         });
       } catch (e) {
         console.warn('[listenExamSubmissions] user fetch warning:', e);
       }
+    };
 
-      const realDocs = snapshot.docs.filter(d => 
-        !d.id.startsWith('sub-init-') && 
-        !d.id.startsWith('sub-sample-') && 
-        !d.id.startsWith('sub-seed-') &&
-        !d.id.startsWith('sim-') &&
-        !d.id.startsWith('sub-sim-') &&
-        !(d.data() as any).isSimulator &&
-        !(d.data() as any).userId?.startsWith('user-sim-')
-      );
-
-      const subs = realDocs.map(d => {
-        const data = d.data() as ExamSubmission;
-        const matchedUser = userMap.get(data.userId) || userMap.get(data.userName);
-        return {
-          ...data,
-          id: d.id,
-          userName: matchedUser?.fullName || matchedUser?.name || data.userName,
-          userRank: matchedUser?.rank || data.userRank,
-          userPosition: matchedUser?.position || data.userPosition,
-          unitName: matchedUser?.unitName || matchedUser?.unit || data.unitName,
-        } as ExamSubmission;
+    const emit = () => {
+      const combinedMap = new Map<string, ExamSubmission>();
+      ketQuaDocs.forEach(s => combinedMap.set(s.id, s));
+      examSubDocs.forEach(s => {
+        if (!combinedMap.has(s.id)) combinedMap.set(s.id, s);
       });
 
-      subs.sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
-      callback(subs);
+      let list = Array.from(combinedMap.values());
+      if (sessionId && sessionId !== 'ALL') {
+        list = list.filter(s => s.sessionId === sessionId || s.sessionTitle === sessionId);
+      }
+      list.sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
+      callback(list);
+    };
+
+    refreshUsers().then(() => emit());
+
+    // Listen to 'ket_qua_thi' (Primary competition and exam submissions collection)
+    const unsubKetQua = onSnapshot(collection(db, 'ket_qua_thi'), (snapshot) => {
+      ketQuaDocs = [];
+      snapshot.docs.forEach(d => {
+        const sub = mapExamDocToSubmission(d, userMap);
+        if (sub) ketQuaDocs.push(sub);
+      });
+      emit();
     }, (err) => {
-      console.warn('[listenExamSubmissions warning]:', err);
-      callback([]);
+      console.warn('[listenExamSubmissions on ket_qua_thi warning]:', err);
     });
+
+    // Listen to 'exam_submissions'
+    const unsubExamSubs = onSnapshot(collection(db, 'exam_submissions'), (snapshot) => {
+      examSubDocs = [];
+      snapshot.docs.forEach(d => {
+        const sub = mapExamDocToSubmission(d, userMap);
+        if (sub) examSubDocs.push(sub);
+      });
+      emit();
+    }, (err) => {
+      console.warn('[listenExamSubmissions on exam_submissions warning]:', err);
+    });
+
+    return () => {
+      unsubKetQua();
+      unsubExamSubs();
+    };
+  },
+
+  // Helper to normalize feedback document data from any client version (especially attached images)
+  normalizeFeedbackDoc: (id: string, data: any): UserFeedback => {
+    return normalizeFeedbackDoc(id, data);
   },
 
   // -------------------------------------------------------------
@@ -3754,75 +4140,46 @@ export const firestoreService = {
   // -------------------------------------------------------------
   getFeedbacks: async (): Promise<UserFeedback[]> => {
     try {
-      const colRef = collection(db, 'feedbacks');
-      const snap = await getDocs(colRef);
-      let list = snap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserFeedback);
-      
-      const flagRef = doc(db, 'system_meta', 'init_flags');
-      const flagSnap = await getDoc(flagRef);
-      const isSeeded = flagSnap.exists() && flagSnap.data()?.feedbacksSeeded;
+      const colFeedbacks = collection(db, 'feedbacks');
+      const colUserFeedbacks = collection(db, 'user_feedbacks');
 
-      if (!isSeeded && list.length === 0) {
-        const sampleFeedbacks: UserFeedback[] = [
-          {
-            id: 'fb-01',
-            userId: 'usr-101',
-            userName: 'Thượng úy Nguyễn Văn Hoàng',
-            userRank: 'Thượng úy',
-            userPosition: 'Phó Tàu trưởng Tàu 012 HQ',
-            unitName: 'Lữ đoàn 162',
-            type: 'QUESTION_ERROR',
-            title: 'Báo lỗi câu hỏi trắc nghiệm số 14 - Đợt thi Quý 1/2026',
-            content: 'Kính gửi Ban Tuyên huấn! Trong câu hỏi số 14 về Lịch sử truyền thống Quân chủng Hải quân, đáp án B và đáp án C bị trùng lặp thông tin ngày thành lập. Đề nghị Ban quản trị kiểm tra và điều chỉnh lại đáp án chuẩn.',
-            relatedExamTitle: 'Đợt 1: Kiểm Tra Nhận Thức Chính Trị Quý 1/2026',
-            relatedQuestionText: 'Câu 14: Ngày thành lập Quân chủng Hải quân Nhân dân Việt Nam là ngày tháng năm nào?',
-            status: 'PENDING',
-            createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-            updatedAt: new Date(Date.now() - 3600000 * 5).toISOString()
-          },
-          {
-            id: 'fb-02',
-            userId: 'usr-102',
-            userName: 'Trung úy Lê Bằng Giang',
-            userRank: 'Trung úy',
-            userPosition: 'Trợ lý Tuyên huấn',
-            unitName: 'Tiểu đoàn 454',
-            type: 'APP_SUGGESTION',
-            title: 'Đề xuất bổ sung tính năng đọc Audio bài học GDCT offline',
-            content: 'Báo cáo đồng chí, đối với các đơn vị trực sẵn sàng chiến đấu trên biển, đường truyền mạng đôi khi bị chập chờn. Đề nghị Ban quản trị cho phép tải trước file MP3 bài giảng về máy để quân nhân tự học offline.',
-            status: 'RECEIVED',
-            adminResponse: 'Ban Tuyên huấn Vùng đã tiếp nhận ý kiến. Hiện tại tính năng tải Offline Package bài học đã sẵn sàng tích hợp trên ứng dụng di động Android.',
-            respondedBy: 'Thượng tá Trần Văn Nam - Trưởng ban TH',
-            respondedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-            createdAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-            updatedAt: new Date(Date.now() - 3600000 * 2).toISOString()
-          },
-          {
-            id: 'fb-03',
-            userId: 'usr-103',
-            userName: 'Đại úy Phạm Quốc Tuấn',
-            userRank: 'Đại úy',
-            userPosition: 'Chính trị viên đảo',
-            unitName: 'Đảo Trường Sa',
-            type: 'GDCT_CONTENT',
-            title: 'Hỏi đáp về tài liệu Chuyên đề Học tập Lời Bác Hồ dạy 2026',
-            content: 'Đề nghị Ban Tuyên huấn Vùng gửi bổ sung file slide PowerPoint gốc của Bài 2 để đơn vị tổ chức học tập tập trung cho cán bộ chiến sĩ tại đảo.',
-            status: 'RESOLVED',
-            adminResponse: 'Đã cập nhật file đính kèm PowerPoint (.pptx) trực tiếp vào chuyên đề trên hệ thống Cloud. Đồng chí có thể truy cập bài học để tải về.',
-            respondedBy: 'Phòng Chính trị Vùng 4',
-            respondedAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-            createdAt: new Date(Date.now() - 3600000 * 48).toISOString(),
-            updatedAt: new Date(Date.now() - 3600000 * 12).toISOString()
-          }
-        ];
+      const [snapF, snapUF] = await Promise.all([
+        getDocs(colFeedbacks).catch(() => ({ docs: [] as any[] })),
+        getDocs(colUserFeedbacks).catch(() => ({ docs: [] as any[] }))
+      ]);
 
-        for (const item of sampleFeedbacks) {
-          await setDoc(doc(db, 'feedbacks', item.id), item);
+      const map = new Map<string, UserFeedback>();
+
+      snapF.docs.forEach((d: any) => {
+        const norm = normalizeFeedbackDoc(d.id, d.data());
+        map.set(d.id, norm);
+      });
+
+      snapUF.docs.forEach((d: any) => {
+        const norm = normalizeFeedbackDoc(d.id, d.data());
+        if (map.has(d.id)) {
+          const existing = map.get(d.id)!;
+          const mergedImages = Array.from(new Set([...(existing.images || []), ...(norm.images || [])]));
+          map.set(d.id, {
+            ...existing,
+            ...norm,
+            images: mergedImages,
+            imageUrls: mergedImages,
+            imageUrl: mergedImages[0] || existing.imageUrl,
+            image: mergedImages[0] || existing.image,
+            hasAttachment: mergedImages.length > 0,
+            attachmentCount: mergedImages.length,
+            adminResponse: existing.adminResponse || norm.adminResponse,
+            responses: (existing.responses && existing.responses.length > 0) ? existing.responses : norm.responses,
+            replies: (existing.replies && existing.replies.length > 0) ? existing.replies : norm.replies,
+            status: existing.status === 'RESOLVED' ? 'RESOLVED' : norm.status
+          });
+        } else {
+          map.set(d.id, norm);
         }
-        await setDoc(flagRef, { feedbacksSeeded: true }, { merge: true });
-        list = sampleFeedbacks;
-      }
+      });
 
+      let list = Array.from(map.values());
       return list.sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
     } catch (err) {
       console.warn('[getFeedbacks error]:', err);
@@ -3876,16 +4233,61 @@ export const firestoreService = {
       timestamp: timestampNow
     };
 
-    if (adminResponse !== undefined) {
-      updatePayload.adminResponse = adminResponse;
-      updatePayload.response = adminResponse;
-      updatePayload.reply = adminResponse;
-      updatePayload.adminReply = adminResponse;
-      updatePayload.feedbackResponse = adminResponse;
-      updatePayload.feedbackReply = adminResponse;
-      updatePayload.traLoi = adminResponse;
-      updatePayload.phanHoi = adminResponse;
-      updatePayload.answer = adminResponse;
+    const newReplyText = (adminResponse || '').trim();
+    let updatedResponses: any[] = [];
+    let combinedResponseText = '';
+
+    if (newReplyText) {
+      // Gather previous responses so they are NEVER overwritten
+      let prevList: any[] = [];
+      if (Array.isArray(existing.responses) && existing.responses.length > 0) {
+        prevList = [...existing.responses];
+      } else if (Array.isArray(existing.replies) && existing.replies.length > 0) {
+        prevList = [...existing.replies];
+      } else if (existing.adminResponse || existing.response || existing.reply) {
+        prevList = [{
+          id: `reply-init-${existing.respondedAtTimestamp || 1}`,
+          content: existing.adminResponse || existing.response || existing.reply,
+          response: existing.adminResponse || existing.response || existing.reply,
+          respondedBy: existing.respondedBy || existing.replyBy || 'Ban Quản Trị',
+          respondedAt: existing.respondedAt || existing.updatedAt || now,
+          timestamp: existing.respondedAtTimestamp || timestampNow
+        }];
+      }
+
+      const newReplyItem = {
+        id: `reply-${timestampNow}-${Math.random().toString(36).substring(2, 6)}`,
+        content: newReplyText,
+        response: newReplyText,
+        reply: newReplyText,
+        respondedBy: responseSender,
+        replyBy: responseSender,
+        respondedAt: now,
+        timestamp: timestampNow
+      };
+
+      updatedResponses = [...prevList, newReplyItem];
+
+      combinedResponseText = updatedResponses
+        .map((r, idx) => {
+          const timeStr = r.respondedAt ? new Date(r.respondedAt).toLocaleString('vi-VN') : '';
+          const prefix = updatedResponses.length > 1 ? `[Phản hồi lần ${idx + 1}${timeStr ? ` - ${timeStr}` : ''}]: ` : '';
+          return `${prefix}${r.content}`;
+        })
+        .join('\n\n');
+
+      updatePayload.responses = updatedResponses;
+      updatePayload.replies = updatedResponses;
+      updatePayload.latestResponse = newReplyText;
+      updatePayload.adminResponse = combinedResponseText;
+      updatePayload.response = combinedResponseText;
+      updatePayload.reply = combinedResponseText;
+      updatePayload.adminReply = combinedResponseText;
+      updatePayload.feedbackResponse = combinedResponseText;
+      updatePayload.feedbackReply = combinedResponseText;
+      updatePayload.traLoi = combinedResponseText;
+      updatePayload.phanHoi = combinedResponseText;
+      updatePayload.answer = combinedResponseText;
       updatePayload.respondedBy = responseSender;
       updatePayload.replyBy = responseSender;
       updatePayload.nguoiTraLoi = responseSender;
@@ -3911,16 +4313,77 @@ export const firestoreService = {
       console.warn('Mirror to user_feedbacks skipped:', err);
     }
 
-    // 2. Dispatch real notification so the Mobile App / User receives it
+    // Resolve target userId (if existing.userId is missing or generic, look up via email/name)
+    let targetUserId = existing.userId || existing.user_id || existing.uid || '';
+    if (!targetUserId || targetUserId === 'usr-mobile') {
+      try {
+        if (existing.userEmail) {
+          const uSnap = await getDocs(query(collection(db, 'users'), where('email', '==', existing.userEmail), limit(1)));
+          if (!uSnap.empty) {
+            targetUserId = uSnap.docs[0].id;
+          }
+        }
+        if (!targetUserId && existing.userName) {
+          const uSnap = await getDocs(query(collection(db, 'users'), where('name', '==', existing.userName), limit(1)));
+          if (!uSnap.empty) {
+            targetUserId = uSnap.docs[0].id;
+          }
+        }
+      } catch (lookupErr) {
+        console.warn('User lookup warning:', lookupErr);
+      }
+    }
+
+    // Mirror to companion documents in user_feedbacks if any exist for this user with same content/time
+    if (targetUserId) {
+      try {
+        const matchingFbs = await getDocs(query(collection(db, 'user_feedbacks'), where('userId', '==', targetUserId)));
+        for (const mDoc of matchingFbs.docs) {
+          if (mDoc.id !== id) {
+            const mData = mDoc.data();
+            const sameContent = (mData.content && existing.content && mData.content === existing.content) ||
+                                (mData.feedback && existing.feedback && mData.feedback === existing.feedback);
+            const closeTime = mData.createdAt && existing.createdAt && (mData.createdAt === existing.createdAt || Math.abs(Number(mData.createdAt) - Number(existing.createdAt)) < 60000);
+            if (sameContent || closeTime) {
+              await setDoc(doc(db, 'user_feedbacks', mDoc.id), updatePayload, { merge: true });
+            }
+          }
+        }
+      } catch (mirrorErr) {
+        console.warn('Companion feedback mirror warning:', mirrorErr);
+      }
+
+      // Mirror directly to personal user subcollections
+      try {
+        await setDoc(doc(db, `users/${targetUserId}/feedbacks`, id), { ...existing, ...updatePayload, userId: targetUserId }, { merge: true });
+      } catch (fErr) { /* ignore */ }
+      try {
+        await setDoc(doc(db, `users/${targetUserId}/gop_y`, id), { ...existing, ...updatePayload, userId: targetUserId }, { merge: true });
+      } catch (gErr) { /* ignore */ }
+    }
+
+    // 2. Dispatch personal notification strictly to the submitting user's account
     try {
       const notifId = `notif-fb-${timestampNow}-${Math.random().toString(36).substring(2, 6)}`;
       const targetUser = existing.userName || 'Đồng chí';
-      const feedbackTopic = existing.title || existing.examName || existing.content || existing.feedback || 'Phản ánh nội dung';
+      // Prioritize actual feedback text content (e.g. "sửa chức năng phản hồi") over generic category title (e.g. "Góp ý chung")
+      const actualFeedbackContent = (
+        existing.content || 
+        existing.feedback || 
+        existing.gopY || 
+        existing.noiDung || 
+        existing.examName || 
+        existing.title || 
+        'nội dung phản ánh'
+      ).trim();
       
-      const notifTitle = `[Phản hồi] Ban Quản Trị đã trả lời phản ánh`;
-      const notifContent = adminResponse 
-        ? `Kính gửi ${targetUser}: Ban Quản Trị (${responseSender}) đã phản hồi phản ánh về "${feedbackTopic.slice(0, 80)}": "${adminResponse}"`
-        : `Phản ánh của ${targetUser} về "${feedbackTopic.slice(0, 80)}" đã được cập nhật trạng thái: ${status === 'RESOLVED' ? 'Đã xử lý' : status}`;
+      const isAdditional = (existing.adminResponse || (Array.isArray(existing.responses) && existing.responses.length > 0));
+      const notifTitle = isAdditional 
+        ? `[Bổ sung phản hồi] Ban Quản Trị đã gửi thêm phản hồi`
+        : `[Phản hồi] Ban Quản Trị đã trả lời góp ý`;
+      const notifContent = newReplyText 
+        ? `Kính gửi ${targetUser}: Ban Quản Trị (${responseSender}) đã ${isAdditional ? 'gửi thêm phản hồi' : 'phản hồi'} về góp ý "${actualFeedbackContent.slice(0, 100)}": "${newReplyText}"`
+        : `Góp ý của ${targetUser} về "${actualFeedbackContent.slice(0, 100)}" đã được cập nhật trạng thái: ${status === 'RESOLVED' ? 'Đã xử lý' : status}`;
 
       const notifPayload: any = {
         id: notifId,
@@ -3930,20 +4393,23 @@ export const firestoreService = {
         body: notifContent,
         type: 'SYSTEM',
         priority: 'HIGH',
-        targetUnitId: existing.unitId || existing.unitName || 'ALL',
-        targetUnit: existing.unitName || 'ALL',
+        targetUnitId: existing.unitId || 'PERSONAL',
+        targetUnit: existing.unitName || 'Cá nhân',
+        isPersonal: true,
+        isBroadcast: false,
         sentBy: responseSender,
         sender: responseSender,
-        userId: existing.userId || '',
-        targetUserId: existing.userId || '',
+        userId: targetUserId || existing.userId || '',
+        targetUserId: targetUserId || existing.userId || '',
         userEmail: existing.userEmail || '',
         targetUserEmail: existing.userEmail || '',
         userName: existing.userName || '',
         feedbackId: id,
-        feedbackTitle: feedbackTopic,
-        adminResponse: adminResponse || '',
-        response: adminResponse || '',
-        reply: adminResponse || '',
+        feedbackTitle: actualFeedbackContent,
+        feedbackContent: actualFeedbackContent,
+        adminResponse: newReplyText || combinedResponseText || existing.adminResponse || '',
+        response: newReplyText || combinedResponseText || existing.adminResponse || '',
+        reply: newReplyText || combinedResponseText || existing.adminResponse || '',
         isRead: false,
         read: false,
         status: 'UNREAD',
@@ -3953,22 +4419,36 @@ export const firestoreService = {
         updatedAt: now
       };
 
-      // 2a. Write to main notifications collection (read by mobile apps & web)
-      await setDoc(doc(db, 'notifications', notifId), notifPayload);
-
-      // 2b. Write to user-specific subcollection if userId is available
-      if (existing.userId) {
+      // 2a. Write exclusively to user-specific personal subcollection
+      const recipientId = targetUserId || existing.userId;
+      if (recipientId) {
         try {
-          await setDoc(doc(db, `users/${existing.userId}/notifications`, notifId), notifPayload);
+          await setDoc(doc(db, `users/${recipientId}/notifications`, notifId), notifPayload);
         } catch (subErr) {
-          console.warn('Could not write to user subcollection:', subErr);
+          console.warn('Could not write to user personal subcollection:', subErr);
         }
 
-        // 2c. Write to user_notifications root collection
+        // 2b. Write to user_notifications root collection (scoped strictly with targetUserId)
         try {
           await setDoc(doc(db, 'user_notifications', notifId), notifPayload);
         } catch (uErr) {
           console.warn('Could not write to user_notifications:', uErr);
+        }
+
+        // 2c. Write to root 'notifications' collection with explicit personal tags
+        // This ensures the mobile app listener receives the notification, 
+        // while the Web CMS screen ("PHÁT LỆNH & THÔNG BÁO CHỈ THỊ") cleanly filters it out.
+        try {
+          await setDoc(doc(db, 'notifications', notifId), {
+            ...notifPayload,
+            targetUserId: recipientId,
+            userId: recipientId,
+            targetUnitId: existing.unitId || 'PERSONAL',
+            isPersonal: true,
+            isBroadcast: false
+          });
+        } catch (mErr) {
+          console.warn('Could not write to notifications:', mErr);
         }
       }
     } catch (notifErr) {
@@ -3979,20 +4459,74 @@ export const firestoreService = {
   },
 
   deleteFeedback: async (id: string): Promise<{ success: boolean }> => {
-    await deleteDoc(doc(db, 'feedbacks', id));
+    try {
+      await deleteDoc(doc(db, 'feedbacks', id));
+    } catch (e) {}
+    try {
+      await deleteDoc(doc(db, 'user_feedbacks', id));
+    } catch (e) {}
     return { success: true };
   },
 
   listenFeedbacks: (callback: (feedbacks: UserFeedback[]) => void) => {
-    const colRef = collection(db, 'feedbacks');
-    return onSnapshot(colRef, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id }) as UserFeedback);
+    let fDocs: any[] = [];
+    let ufDocs: any[] = [];
+
+    const emit = () => {
+      const map = new Map<string, UserFeedback>();
+
+      fDocs.forEach((d: any) => {
+        const norm = normalizeFeedbackDoc(d.id, d.data());
+        map.set(d.id, norm);
+      });
+
+      ufDocs.forEach((d: any) => {
+        const norm = normalizeFeedbackDoc(d.id, d.data());
+        if (map.has(d.id)) {
+          const existing = map.get(d.id)!;
+          const mergedImages = Array.from(new Set([...(existing.images || []), ...(norm.images || [])]));
+          map.set(d.id, {
+            ...existing,
+            ...norm,
+            images: mergedImages,
+            imageUrls: mergedImages,
+            imageUrl: mergedImages[0] || existing.imageUrl,
+            image: mergedImages[0] || existing.image,
+            hasAttachment: mergedImages.length > 0,
+            attachmentCount: mergedImages.length,
+            adminResponse: existing.adminResponse || norm.adminResponse,
+            responses: (existing.responses && existing.responses.length > 0) ? existing.responses : norm.responses,
+            replies: (existing.replies && existing.replies.length > 0) ? existing.replies : norm.replies,
+            status: existing.status === 'RESOLVED' ? 'RESOLVED' : norm.status
+          });
+        } else {
+          map.set(d.id, norm);
+        }
+      });
+
+      const list = Array.from(map.values());
       list.sort((a, b) => getSafeTimestamp(b.createdAt) - getSafeTimestamp(a.createdAt));
       callback(list);
+    };
+
+    const unsubF = onSnapshot(collection(db, 'feedbacks'), (snapshot) => {
+      fDocs = snapshot.docs;
+      emit();
     }, (err) => {
-      console.warn('[listenFeedbacks warning]:', err);
-      callback([]);
+      console.warn('[listenFeedbacks feedbacks warning]:', err);
     });
+
+    const unsubUF = onSnapshot(collection(db, 'user_feedbacks'), (snapshot) => {
+      ufDocs = snapshot.docs;
+      emit();
+    }, (err) => {
+      console.warn('[listenFeedbacks user_feedbacks warning]:', err);
+    });
+
+    return () => {
+      unsubF();
+      unsubUF();
+    };
   },
 
   // -------------------------------------------------------------

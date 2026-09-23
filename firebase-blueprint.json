@@ -751,9 +751,72 @@
         }
       },
       "required": ["id", "title", "category", "audioUrl", "status", "createdAt"]
+    },
+    "KetQuaThi": {
+      "title": "KetQuaThi",
+      "description": "Kết quả cuộc thi và đợt kiểm tra trực tuyến từ ứng dụng di động",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Mã kết quả bài thi"
+        },
+        "dotThiId": {
+          "type": "string",
+          "description": "Mã đợt thi"
+        },
+        "tenDotThi": {
+          "type": "string",
+          "description": "Tên đợt thi"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Mã quân nhân dự thi"
+        },
+        "userName": {
+          "type": "string",
+          "description": "Họ và tên thí sinh"
+        },
+        "donVi": {
+          "type": "string",
+          "description": "Đơn vị trực thuộc"
+        },
+        "capBac": {
+          "type": "string",
+          "description": "Cấp bậc"
+        },
+        "diem": {
+          "type": "number",
+          "description": "Điểm số"
+        },
+        "soCauDung": {
+          "type": "number",
+          "description": "Số câu trả lời đúng"
+        },
+        "tongSoCau": {
+          "type": "number",
+          "description": "Tổng số câu hỏi"
+        },
+        "loaiBaiThi": {
+          "type": "string",
+          "description": "Phân loại bài thi (chinh_thuc, on_luyen,...)"
+        },
+        "isOfficial": {
+          "type": "boolean",
+          "description": "Đánh dấu đợt thi chính thức"
+        },
+        "thoiGianNop": {
+          "type": "number",
+          "description": "Thời gian nộp bài"
+        }
+      }
     }
   },
   "firestore": {
+    "/ket_qua_thi/{resultId}": {
+      "schema": "KetQuaThi",
+      "description": "Lưu trữ kết quả thi trực tuyến từ ứng dụng"
+    },
     "/courses/{courseId}": {
       "schema": "Course",
       "description": "Tập hợp các chuyên đề Giáo dục chính trị"

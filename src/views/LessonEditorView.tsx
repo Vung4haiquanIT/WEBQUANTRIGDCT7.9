@@ -2336,34 +2336,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
           {/* ========================================================= */}
           {activeModuleTab === 'contents' && (
             <div className="space-y-6">
-              {/* TOP HEADER */}
-              <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 p-6 rounded-2xl border border-blue-900/60 text-white flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-md">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="bg-amber-500 text-slate-950 font-bold px-2.5 py-0.5 rounded text-[10px] tracking-wider uppercase flex items-center gap-1">
-                      <DongSonDrum className="w-3.5 h-3.5" color="#020617" /> Biên soạn nội dung & Tài liệu học tập
-                    </span>
-                  </div>
-                  <h3 className="text-base font-bold text-white mt-1">
-                    Biên soạn nội dung bài giảng & Đính kèm tài liệu Word / PDF
-                  </h3>
-                  <p className="text-xs text-slate-300 mt-0.5 max-w-2xl">
-                    Soạn thảo nội dung trực quan bằng trình soạn thảo Quill để đồng bộ lên Firebase hiển thị trên ứng dụng, đồng thời đính kèm tài liệu Word hoặc PDF để học viên tải về.
-                  </p>
-                </div>
-
-                <div className="flex items-center space-x-3">
-                  <button
-                    onClick={handleSaveMainContent}
-                    disabled={isSavingContent}
-                    className="px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg flex items-center space-x-2 transition-all cursor-pointer disabled:opacity-50 active:scale-95"
-                  >
-                    <Save className={`w-4 h-4 ${isSavingContent ? 'animate-spin' : ''}`} />
-                    <span>{isSavingContent ? 'Đang lưu...' : 'LƯU NỘI DUNG LÊN FIREBASE'}</span>
-                  </button>
-                </div>
-              </div>
-
               {/* QUILL EDITOR SECTION */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -2371,7 +2343,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                     <FileText className="w-5 h-5 text-blue-600" />
                     <h4 className="text-sm font-bold text-slate-800">Trình soạn thảo nội dung bài giảng (Quill WYSIWYG)</h4>
                   </div>
-                  <span className="text-xs text-slate-500 font-mono">Đồng bộ trực tiếp với Firebase</span>
                 </div>
 
                 <QuillEditor
@@ -2503,9 +2474,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                       <h4 className="text-sm font-bold text-slate-800">
                         Câu hỏi kiểm tra & Đánh giá nhận thức sau bài học ({questions.length} câu hỏi)
                       </h4>
-                      <p className="text-xs text-slate-500">
-                        Hệ thống câu hỏi trắc nghiệm, tự luận để kiểm tra, đánh giá kết quả học tập của học viên trên ứng dụng.
-                      </p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2 shrink-0">
@@ -2515,24 +2483,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                     >
                       <span>+ Thêm câu hỏi</span>
                     </button>
-                    {questions.length > 0 && (
-                      <button
-                        onClick={handleSaveAllQuestions}
-                        disabled={isSavingQuestions}
-                        className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md flex items-center space-x-1.5 transition-all active:scale-95 cursor-pointer"
-                      >
-                        {isSavingQuestions ? (
-                          <>
-                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            <span>Đang lưu lên Firebase...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span>💾 Lưu toàn bộ câu hỏi kiểm tra</span>
-                          </>
-                        )}
-                      </button>
-                    )}
                   </div>
                 </div>
 
@@ -2592,9 +2542,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                           </div>
 
                           <div className="flex items-center space-x-2">
-                            <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">
-                              Điểm: {q.points || 10}đ
-                            </span>
                             <button
                               onClick={() => handleDeleteQuestion(q.id)}
                               className="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors cursor-pointer"
@@ -2730,8 +2677,6 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                       <div className="flex items-center space-x-2 text-xs text-slate-700 font-medium">
                         <span className="font-bold text-slate-900">Tổng cộng:</span>
                         <span className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded-md font-bold">{questions.length} câu hỏi</span>
-                        <span>•</span>
-                        <span className="text-slate-600">Tổng điểm: {questions.reduce((acc, curr) => acc + (curr.points || 10), 0)}đ</span>
                       </div>
                       <div className="flex items-center space-x-2">
                         <button

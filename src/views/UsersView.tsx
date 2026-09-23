@@ -56,12 +56,23 @@ export const QNCN_RANKS = [
   'Thiếu úy CN'
 ];
 
-export const getTargetGroupFromRank = (rank?: string, targetGroup?: string): 'SQ' | 'QNCN' => {
-  if (targetGroup === 'QNCN' || targetGroup === 'SQ') return targetGroup;
+export const HSQ_BS_RANKS = [
+  'Thượng sĩ',
+  'Trung sĩ',
+  'Hạ sĩ',
+  'Binh nhất',
+  'Binh nhì'
+];
+
+export const getTargetGroupFromRank = (rank?: string, targetGroup?: string): 'SQ' | 'QNCN' | 'HSQ-BS' => {
+  if (targetGroup === 'QNCN' || targetGroup === 'SQ' || targetGroup === 'HSQ-BS') return targetGroup;
   if (!rank) return 'SQ';
   const upper = rank.toUpperCase();
   if (upper.includes('CN') || QNCN_RANKS.some(r => r.toUpperCase() === upper)) {
     return 'QNCN';
+  }
+  if (HSQ_BS_RANKS.some(r => r.toUpperCase() === upper) || upper.includes('BINH') || upper.includes('HẠ SĨ') || upper.includes('TRUNG SĨ') || upper.includes('THƯỢNG SĨ')) {
+    return 'HSQ-BS';
   }
   return 'SQ';
 };
@@ -147,7 +158,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
     email: '',
     password: '123@abc',
     role: 'USER' as UserRole,
-    targetGroup: 'SQ' as 'SQ' | 'QNCN',
+    targetGroup: 'SQ' as 'SQ' | 'QNCN' | 'HSQ-BS',
     rank: 'Đại úy',
     position: 'Chính trị viên',
     rankAndPosition: 'Đại úy - Chính trị viên',
@@ -202,7 +213,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
   const handleOpenNew = () => {
     setEditingUser(null);
     setFormError(null);
-    const defaultTargetGroup: 'SQ' | 'QNCN' = 'SQ';
+    const defaultTargetGroup: 'SQ' | 'QNCN' | 'HSQ-BS' = 'SQ';
     const defaultRank = 'Đại úy';
     const defaultPosition = 'Chính trị viên';
     setFormData({
@@ -226,8 +237,9 @@ export const UsersView: React.FC<UsersViewProps> = ({
     setFormError(null);
     const normRole = normalizeRole(u.role || 'USER');
     const targetGroup = getTargetGroupFromRank(u.rank, u.targetGroup || u.doiTuong);
-    const r = u.rank || (targetGroup === 'QNCN' ? 'Đại úy CN' : 'Đại úy');
-    const p = u.position || 'Chính trị viên';
+    const defaultRankByGroup = targetGroup === 'QNCN' ? 'Đại úy CN' : targetGroup === 'HSQ-BS' ? 'Thượng sĩ' : 'Đại úy';
+    const r = u.rank || defaultRankByGroup;
+    const p = u.position || (targetGroup === 'HSQ-BS' ? 'Chiến sĩ' : 'Chính trị viên');
     const rankPos = u.rankAndPosition || (r && p ? `${r} - ${p}` : r || p);
     const matchedUnit = units.find(unitItem => unitItem.id === u.unitId || unitItem.name === (u.unit || u.unitName));
     const active = isUserActive(u);
@@ -248,6 +260,34 @@ export const UsersView: React.FC<UsersViewProps> = ({
     setIsModalOpen(true);
   };
 
+  const formatDateTimeRobust = (dateVal: any): string => {
+    if (!dateVal) return '—';
+    if (typeof dateVal === 'object') {
+      if (typeof dateVal.toDate === 'function') {
+        try {
+          const d = dateVal.toDate();
+          return `${d.toLocaleTimeString('vi-VN')} ${d.toLocaleDateString('vi-VN')}`;
+        } catch (_) {}
+      }
+      if (typeof dateVal.seconds === 'number') {
+        const d = new Date(dateVal.seconds * 1000);
+        return `${d.toLocaleTimeString('vi-VN')} ${d.toLocaleDateString('vi-VN')}`;
+      }
+    }
+    const d = new Date(dateVal);
+    if (!isNaN(d.getTime())) {
+      return `${d.toLocaleTimeString('vi-VN')} ${d.toLocaleDateString('vi-VN')}`;
+    }
+    const num = Number(dateVal);
+    if (!isNaN(num) && num > 0) {
+      const nd = new Date(num);
+      if (!isNaN(nd.getTime())) {
+        return `${nd.toLocaleTimeString('vi-VN')} ${nd.toLocaleDateString('vi-VN')}`;
+      }
+    }
+    return '—';
+  };
+
   const handleOpenUserDetail = async (u: User) => {
     setViewingUser(u);
     setUserDetailTab('profile');
@@ -255,7 +295,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
     setUserDetailData(null);
 
     try {
-      const res = await api.getUserPersonalCloudData(u.id);
+      const res = await api.getUserPersonalCloudData(u.id, u);
       setUserDetailData(res);
     } catch (err) {
       console.error('Lỗi tải dữ liệu cá nhân đồng bộ:', err);
@@ -322,15 +362,19 @@ export const UsersView: React.FC<UsersViewProps> = ({
     }
   };
 
-  const handleTargetGroupChange = (newTargetGroup: 'SQ' | 'QNCN') => {
+  const handleTargetGroupChange = (newTargetGroup: 'SQ' | 'QNCN' | 'HSQ-BS') => {
     let newRank = formData.rank;
     if (newTargetGroup === 'SQ') {
       if (!SQ_RANKS.includes(newRank)) {
         newRank = 'Đại úy';
       }
-    } else {
+    } else if (newTargetGroup === 'QNCN') {
       if (!QNCN_RANKS.includes(newRank)) {
         newRank = 'Đại úy CN';
+      }
+    } else {
+      if (!HSQ_BS_RANKS.includes(newRank)) {
+        newRank = 'Thượng sĩ';
       }
     }
     setFormData(prev => ({
@@ -360,10 +404,8 @@ export const UsersView: React.FC<UsersViewProps> = ({
     try {
       const unitData: Partial<Unit> = {
         name: newUnitFormData.name.trim(),
-        code: `DV-${Date.now().toString().slice(-4)}`,
         type: 'BRIGADE',
         status: 'ACTIVE',
-        memberCount: 0,
         commander: newUnitFormData.commander.trim(),
         politicalOfficer: newUnitFormData.politicalOfficer.trim(),
         description: newUnitFormData.description.trim(),
@@ -547,7 +589,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
         }
 
         // Backward compatibility: If user uploaded 8-column file with "Đơn vị" at column 4
-        if (row.length >= 8 && (String(row[5] || '').toUpperCase().includes('SQ') || String(row[5] || '').toUpperCase().includes('QNCN'))) {
+        if (row.length >= 8 && (String(row[5] || '').toUpperCase().includes('SQ') || String(row[5] || '').toUpperCase().includes('QNCN') || String(row[5] || '').toUpperCase().includes('HSQ'))) {
           rawFullName = String(row[1] || '').trim();
           rawRank = String(row[2] || '').trim();
           rawPosition = String(row[3] || '').trim();
@@ -558,16 +600,20 @@ export const UsersView: React.FC<UsersViewProps> = ({
 
         if (!rawFullName) continue;
 
-        // Target group determination: SQ vs QNCN
-        let targetGroup: 'SQ' | 'QNCN' = 'SQ';
+        // Target group determination: SQ vs QNCN vs HSQ-BS
+        let targetGroup: 'SQ' | 'QNCN' | 'HSQ-BS' = 'SQ';
         if (rawTargetGroup === 'QNCN' || rawTargetGroup.includes('QNCN') || rawTargetGroup.includes('CHUYÊN NGHIỆP') || rawTargetGroup.includes('CHUYEN NGHIEP')) {
           targetGroup = 'QNCN';
+        } else if (rawTargetGroup === 'HSQ-BS' || rawTargetGroup.includes('HSQ') || rawTargetGroup.includes('BINH SĨ') || rawTargetGroup.includes('BINH SI')) {
+          targetGroup = 'HSQ-BS';
         } else if (rawTargetGroup === 'SQ' || rawTargetGroup.includes('SĨ QUAN') || rawTargetGroup.includes('SI QUAN')) {
           targetGroup = 'SQ';
         } else {
           // Auto deduce from rank name
           if (rawRank.toUpperCase().includes('CN') || QNCN_RANKS.some(rk => rk.toUpperCase() === rawRank.toUpperCase())) {
             targetGroup = 'QNCN';
+          } else if (HSQ_BS_RANKS.some(rk => rk.toUpperCase() === rawRank.toUpperCase()) || rawRank.toUpperCase().includes('BINH') || rawRank.toUpperCase().includes('HẠ SĨ') || rawRank.toUpperCase().includes('TRUNG SĨ') || rawRank.toUpperCase().includes('THƯỢNG SĨ')) {
+            targetGroup = 'HSQ-BS';
           } else {
             targetGroup = 'SQ';
           }
@@ -576,9 +622,9 @@ export const UsersView: React.FC<UsersViewProps> = ({
         // Validate and normalize rank
         let finalRank = rawRank;
         if (!finalRank) {
-          finalRank = targetGroup === 'QNCN' ? 'Đại úy CN' : 'Đại úy';
+          finalRank = targetGroup === 'QNCN' ? 'Đại úy CN' : targetGroup === 'HSQ-BS' ? 'Thượng sĩ' : 'Đại úy';
         }
-        let finalPosition = rawPosition || 'Chính trị viên';
+        let finalPosition = rawPosition || (targetGroup === 'HSQ-BS' ? 'Chiến sĩ' : 'Chính trị viên');
 
         // Format Email / Username
         if (rawEmail) {
@@ -641,13 +687,15 @@ export const UsersView: React.FC<UsersViewProps> = ({
           updated.name = value;
         }
         if (field === 'targetGroup') {
-          const newGroup = value as 'SQ' | 'QNCN';
+          const newGroup = value as 'SQ' | 'QNCN' | 'HSQ-BS';
           updated.targetGroup = newGroup;
           updated.doiTuong = newGroup;
           if (newGroup === 'SQ' && !SQ_RANKS.includes(updated.rank)) {
             updated.rank = 'Đại úy';
           } else if (newGroup === 'QNCN' && !QNCN_RANKS.includes(updated.rank)) {
             updated.rank = 'Đại úy CN';
+          } else if (newGroup === 'HSQ-BS' && !HSQ_BS_RANKS.includes(updated.rank)) {
+            updated.rank = 'Thượng sĩ';
           }
           updated.rankAndPosition = `${updated.rank} - ${updated.position}`.trim();
         }
@@ -784,7 +832,9 @@ export const UsersView: React.FC<UsersViewProps> = ({
       ['1', 'Phạm Khắc Thành', 'Thượng tá', 'Trưởng ban Tuyên huấn', 'SQ', 'khacthanh@v4.hq', '123@abc'],
       ['2', 'Phạm Tất Thắng', 'Thượng úy', 'Trợ lý Tuyên huấn', 'SQ', 'tatthang@v4.hq', '123@abc'],
       ['3', 'Nguyễn Văn Hải', 'Đại úy CN', 'Nhân viên kỹ thuật', 'QNCN', 'hainv@v4.hq', '123@abc'],
-      ['4', 'Trần Văn Nam', 'Trung úy CN', 'Khẩu đội trưởng', 'QNCN', 'namtv@v4.hq', '123@abc']
+      ['4', 'Trần Văn Nam', 'Trung úy CN', 'Khẩu đội trưởng', 'QNCN', 'namtv@v4.hq', '123@abc'],
+      ['5', 'Lê Văn Cường', 'Thượng sĩ', 'Tiểu đội trưởng', 'HSQ-BS', 'cuonglv@v4.hq', '123@abc'],
+      ['6', 'Nguyễn Hoàng Anh', 'Binh nhất', 'Chiến sĩ', 'HSQ-BS', 'anhnh@v4.hq', '123@abc']
     ];
 
     const ws_data = [headers, ...sampleData];
@@ -795,7 +845,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
       { wch: 25 }, // Họ tên
       { wch: 18 }, // Cấp bậc
       { wch: 25 }, // Chức vụ
-      { wch: 15 }, // Đối tượng (SQ / QNCN)
+      { wch: 20 }, // Đối tượng (SQ / QNCN / HSQ-BS)
       { wch: 25 }, // Tên tài khoản
       { wch: 16 }  // Mật khẩu
     ];
@@ -1036,11 +1086,21 @@ export const UsersView: React.FC<UsersViewProps> = ({
                         <div className="flex items-center space-x-1.5">
                           {(() => {
                             const tg = getTargetGroupFromRank(u.rank, u.targetGroup || u.doiTuong);
-                            return tg === 'QNCN' ? (
-                              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
-                                QNCN
-                              </span>
-                            ) : (
+                            if (tg === 'QNCN') {
+                              return (
+                                <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+                                  QNCN
+                                </span>
+                              );
+                            }
+                            if (tg === 'HSQ-BS') {
+                              return (
+                                <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
+                                  HSQ-BS
+                                </span>
+                              );
+                            }
+                            return (
                               <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200 shrink-0">
                                 SQ
                               </span>
@@ -1268,44 +1328,88 @@ export const UsersView: React.FC<UsersViewProps> = ({
                       <table className="w-full text-left text-xs">
                         <thead className="bg-slate-50 text-[11px] font-semibold text-slate-500 border-b border-slate-200">
                           <tr>
+                            <th className="p-3 text-center w-12">STT</th>
                             <th className="p-3">Bài học / Chuyên đề</th>
-                            <th className="p-3 text-center">Slide %</th>
-                            <th className="p-3 text-center">Nội dung %</th>
-                            <th className="p-3 text-center">Video %</th>
-                            <th className="p-3 text-center">Audio %</th>
-                            <th className="p-3 text-center">Tổng quan %</th>
+                            <th className="p-3">Tiến độ hoàn thành</th>
+                            <th className="p-3 text-center">Trạng thái</th>
                             <th className="p-3 text-right">Lần cuối học</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {userDetailData.progressList.map(prog => (
-                            <tr key={prog.id} className="hover:bg-slate-50">
-                              <td className="p-3 font-semibold text-slate-800 max-w-[200px] truncate">
-                                {prog.lessonTitle || prog.lessonId}
-                              </td>
-                              <td className="p-3 text-center font-mono">{Number(prog.slideProgress || 0).toFixed(2)}%</td>
-                              <td className="p-3 text-center font-mono">{Number(prog.contentProgress || 0).toFixed(2)}%</td>
-                              <td className="p-3 text-center font-mono">{Number(prog.videoProgress || 0).toFixed(2)}%</td>
-                              <td className="p-3 text-center font-mono">{Number(prog.audioProgress || 0).toFixed(2)}%</td>
-                              <td className="p-3 text-center">
-                                <span className={`font-bold px-2 py-0.5 rounded-md text-[11px] ${
-                                  (prog.overallProgress || 0) >= 80 ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
-                                }`}>
-                                  {Number(prog.overallProgress || 0).toFixed(2)}%
-                                </span>
-                              </td>
-                              <td className="p-3 text-right text-slate-500 text-[11px]">
-                                {(() => {
-                                  if (!prog.lastAccessedAt) return '—';
-                                  const d = new Date(prog.lastAccessedAt);
-                                  if (!isNaN(d.getTime())) return d.toLocaleString('vi-VN');
-                                  const num = Number(prog.lastAccessedAt);
-                                  if (!isNaN(num) && num > 0) return new Date(num).toLocaleString('vi-VN');
-                                  return '—';
-                                })()}
-                              </td>
-                            </tr>
-                          ))}
+                          {userDetailData.progressList.map((prog, idx) => {
+                            const progPercent = Math.min(
+                              100,
+                              Math.max(
+                                0,
+                                typeof prog.overallProgress === 'number'
+                                  ? prog.overallProgress
+                                  : typeof (prog as any).progress === 'number'
+                                  ? (prog as any).progress
+                                  : prog.completed
+                                  ? 100
+                                  : 0
+                              )
+                            );
+                            const isDone = prog.completed === true || progPercent >= 100;
+                            const isLearning = !isDone && progPercent > 0;
+
+                            return (
+                              <tr key={prog.id || `prog-${idx}`} className="hover:bg-slate-50 transition-colors">
+                                <td className="p-3 text-center font-mono text-slate-400">{idx + 1}</td>
+                                <td className="p-3 font-semibold text-slate-800">
+                                  <div className="font-bold text-slate-900" title={prog.lessonTitle || prog.lessonId}>
+                                    {prog.lessonTitle || prog.lessonId}
+                                  </div>
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex items-center space-x-2.5">
+                                    <div className="w-28 bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200 shrink-0">
+                                      <div
+                                        className={`h-full transition-all ${
+                                          isDone
+                                            ? 'bg-emerald-500'
+                                            : progPercent >= 80
+                                            ? 'bg-emerald-500'
+                                            : progPercent >= 50
+                                            ? 'bg-blue-600'
+                                            : progPercent > 0
+                                            ? 'bg-amber-500'
+                                            : 'bg-slate-300'
+                                        }`}
+                                        style={{ width: `${progPercent}%` }}
+                                      />
+                                    </div>
+                                    <span className="font-mono font-bold text-xs text-slate-800">
+                                      {progPercent.toFixed(1)}%
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-3 text-center">
+                                  {isDone ? (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      Đã hoàn thành
+                                    </span>
+                                  ) : isLearning ? (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                      Đang học
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                      Chưa học
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right text-slate-500 text-[11px] font-mono">
+                                  {formatDateTimeRobust(
+                                    prog.lastAccessedAt ||
+                                    (prog as any).updatedAt ||
+                                    (prog as any).completedAt ||
+                                    (prog as any).createdAt
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1346,8 +1450,8 @@ export const UsersView: React.FC<UsersViewProps> = ({
                                   </span>
                                 )}
                               </td>
-                              <td className="p-3 text-right text-slate-500 text-[11px]">
-                                {sub.submittedAt ? new Date(sub.submittedAt).toLocaleString('vi-VN') : '—'}
+                              <td className="p-3 text-right text-slate-500 text-[11px] font-mono">
+                                {formatDateTimeRobust(sub.submittedAt || (sub as any).createdAt)}
                               </td>
                             </tr>
                           ))}
@@ -1365,14 +1469,31 @@ export const UsersView: React.FC<UsersViewProps> = ({
                   ) : (
                     <div className="space-y-3">
                       {userDetailData.feedbacks.map(fb => (
-                        <div key={fb.id} className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+                        <div key={fb.id} className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
                           <div className="flex items-center justify-between font-bold text-slate-800">
-                            <span>{fb.title || 'Phản ánh nội dung'}</span>
-                            <span className="text-[10px] text-slate-400">
-                              {fb.createdAt ? new Date(fb.createdAt).toLocaleString('vi-VN') : ''}
+                            <div className="flex items-center gap-2">
+                              <span>{fb.title || 'Phản ánh nội dung'}</span>
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                fb.status === 'RESOLVED'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+                              }`}>
+                                {fb.status === 'RESOLVED' ? 'Đã xử lý' : 'Đang xử lý'}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {formatDateTimeRobust(fb.createdAt || (fb as any).updatedAt)}
                             </span>
                           </div>
-                          <p className="text-slate-600">{fb.content}</p>
+                          <p className="text-slate-600 bg-white p-2.5 rounded-lg border border-slate-100">
+                            {fb.content}
+                          </p>
+                          {fb.adminResponse && (
+                            <div className="p-2 rounded-lg bg-emerald-50/70 border border-emerald-100 text-emerald-900 text-[11px]">
+                              <span className="font-semibold">Phản hồi của quản trị viên: </span>
+                              {fb.adminResponse}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1547,11 +1668,12 @@ export const UsersView: React.FC<UsersViewProps> = ({
                   <select
                     id="form-user-target-group"
                     value={formData.targetGroup}
-                    onChange={(e) => handleTargetGroupChange(e.target.value as 'SQ' | 'QNCN')}
+                    onChange={(e) => handleTargetGroupChange(e.target.value as 'SQ' | 'QNCN' | 'HSQ-BS')}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-semibold focus:outline-hidden focus:border-blue-500 focus:bg-white cursor-pointer"
                   >
                     <option value="SQ">SQ (Sĩ quan)</option>
                     <option value="QNCN">QNCN (Quân nhân chuyên nghiệp)</option>
+                    <option value="HSQ-BS">HSQ-BS (Hạ sĩ quan - Binh sĩ)</option>
                   </select>
                 </div>
                 <div>
@@ -1564,7 +1686,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
                     onChange={(e) => handleRankOrPosChange(e.target.value, formData.position)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-800 font-semibold focus:outline-hidden focus:border-blue-500 focus:bg-white cursor-pointer"
                   >
-                    {(formData.targetGroup === 'QNCN' ? QNCN_RANKS : SQ_RANKS).map((rk) => (
+                    {(formData.targetGroup === 'QNCN' ? QNCN_RANKS : formData.targetGroup === 'HSQ-BS' ? HSQ_BS_RANKS : SQ_RANKS).map((rk) => (
                       <option key={rk} value={rk}>
                         {rk}
                       </option>
@@ -1770,7 +1892,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
                               onChange={(e) => handleUpdateParsedUser(u.id, 'rank', e.target.value)}
                               className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 rounded-lg px-2 py-1.5 text-xs text-slate-800 font-medium transition-all cursor-pointer"
                             >
-                              {(u.targetGroup === 'QNCN' ? QNCN_RANKS : SQ_RANKS).map((rk) => (
+                              {(u.targetGroup === 'QNCN' ? QNCN_RANKS : u.targetGroup === 'HSQ-BS' ? HSQ_BS_RANKS : SQ_RANKS).map((rk) => (
                                 <option key={rk} value={rk}>
                                   {rk}
                                 </option>
@@ -1796,6 +1918,7 @@ export const UsersView: React.FC<UsersViewProps> = ({
                             >
                               <option value="SQ">SQ</option>
                               <option value="QNCN">QNCN</option>
+                              <option value="HSQ-BS">HSQ-BS</option>
                             </select>
                           </td>
                           <td className="py-2 px-2">

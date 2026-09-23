@@ -3,10 +3,11 @@ import {
   FileSpreadsheet, Plus, Upload, Play, CheckCircle2, XCircle, Clock, Calendar,
   Award, ShieldCheck, Download, Trash2, Eye, RefreshCw, Search, Filter,
   Users, Layers, ArrowRight, AlertCircle, FileText, Check, X, Smartphone, BarChart3,
-  Edit3, TrendingUp, Medal, ChevronRight
+  Edit3, TrendingUp, Medal, ChevronRight, Printer, HelpCircle, CheckCircle
 } from 'lucide-react';
 import { ExamBank, ExamQuestion, ExamSession, ExamSubmission, Unit, User, UserProgress } from '../types';
 import { api } from '../services/api';
+import { db, doc, getDoc } from '../services/firebase';
 import { parseExamQuestionsFromExcel, downloadSampleExamExcelTemplate, ParsedExamExcelResult } from '../utils/excelExamParser';
 import { matchSearch } from '../utils/vietnamese';
 import * as XLSX from 'xlsx';
@@ -38,10 +39,23 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   const [editingSession, setEditingSession] = useState<ExamSession | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<ExamSession | null>(null);
   const [bankToDelete, setBankToDelete] = useState<ExamBank | null>(null);
-  const [reportViewMode, setReportViewMode] = useState<'unit' | 'candidate' | 'account'>('unit');
+  const [reportViewMode, setReportViewMode] = useState<'unit' | 'candidate'>('unit');
   const [selectedBankForDetail, setSelectedBankForDetail] = useState<ExamBank | null>(null);
   const [selectedSessionForReport, setSelectedSessionForReport] = useState<ExamSession | null>(null);
   const [selectedSubmissionForDetail, setSelectedSubmissionForDetail] = useState<ExamSubmission | null>(null);
+  const [detailQuestions, setDetailQuestions] = useState<ExamQuestion[]>([]);
+  const [detailQuestionsSource, setDetailQuestionsSource] = useState<string>('');
+  const [isLoadingDetailQuestions, setIsLoadingDetailQuestions] = useState<boolean>(false);
+  const [selectedAccountForExamDetail, setSelectedAccountForExamDetail] = useState<{
+    user: User;
+    rank: string;
+    position: string;
+    unitName: string;
+    examCount: number;
+    highestScore: number;
+    submissions: ExamSubmission[];
+    sessionFilterTitle?: string;
+  } | null>(null);
 
   // Test Simulator Modal (Mobile App Exam Simulator)
   const [activeSimulatorSession, setActiveSimulatorSession] = useState<ExamSession | null>(null);
@@ -160,37 +174,104 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
   // Helper: format ISO / timestamp to YYYY-MM-DD for date input
   const formatForDateInput = (dateInput?: string | Date | number): string => {
     if (!dateInput) return '';
+    if (typeof dateInput === 'string') {
+      if (dateInput.endsWith('Z')) {
+        const d = new Date(dateInput);
+        if (!isNaN(d.getTime())) {
+          const pad = (n: number) => String(n).padStart(2, '0');
+          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        }
+      } else if (dateInput.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+        return dateInput.substring(0, 10);
+      }
+    }
     const d = new Date(dateInput);
     if (isNaN(d.getTime())) return '';
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   };
 
-  // Helper: convert YYYY-MM-DD to ISO at start of day (00:00:00.000)
+  const getTzOffsetString = (): string => {
+    const offsetMin = -new Date().getTimezoneOffset();
+    const sign = offsetMin >= 0 ? '+' : '-';
+    const absMin = Math.abs(offsetMin);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+  };
+
+  // Helper: convert YYYY-MM-DD to ISO at start of day (00:00:00) with local offset (+07:00)
   const convertDateToStartOfDayIso = (dateStr: string): string => {
     if (!dateStr) return '';
-    const [y, m, d] = dateStr.split('-').map(Number);
+    const cleanStr = dateStr.includes('T') ? dateStr.substring(0, 10) : dateStr;
+    const [y, m, d] = cleanStr.split('-').map(Number);
     if (y && m && d) {
-      const date = new Date(y, m - 1, d, 0, 0, 0, 0);
-      return date.toISOString();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${y}-${pad(m)}-${pad(d)}T00:00:00${getTzOffsetString()}`;
     }
     return '';
   };
 
-  // Helper: convert YYYY-MM-DD to ISO at end of day (23:59:59.999)
+  // Helper: convert YYYY-MM-DD to ISO at end of day (23:59:59) with local offset (+07:00)
   const convertDateToEndOfDayIso = (dateStr: string): string => {
     if (!dateStr) return '';
-    const [y, m, d] = dateStr.split('-').map(Number);
+    const cleanStr = dateStr.includes('T') ? dateStr.substring(0, 10) : dateStr;
+    const [y, m, d] = cleanStr.split('-').map(Number);
     if (y && m && d) {
-      const date = new Date(y, m - 1, d, 23, 59, 59, 999);
-      return date.toISOString();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${y}-${pad(m)}-${pad(d)}T23:59:59${getTzOffsetString()}`;
     }
     return '';
+  };
+
+  // Helper to format targetGroup string for display
+  const formatTargetGroupDisplay = (targetGroup?: string): string => {
+    if (!targetGroup || targetGroup === 'ALL') return 'Tất cả';
+    const parts = targetGroup.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 0 || parts.includes('ALL')) return 'Tất cả';
+    
+    const uniqueParts = Array.from(new Set(parts));
+    if (uniqueParts.length >= 3) return 'Tất cả';
+
+    const labels = uniqueParts.map(p => {
+      if (p === 'SQ') return 'Sĩ quan (SQ)';
+      if (p === 'QNCN') return 'QNCN';
+      if (p === 'HSQ-BS') return 'HSQ-BS';
+      return p;
+    });
+    return labels.join(', ');
+  };
+
+  // Helper to parse targetGroup string into array of selected group keys
+  const parseTargetGroups = (targetGroupStr?: string): string[] => {
+    if (!targetGroupStr || targetGroupStr === 'ALL') return ['SQ', 'QNCN', 'HSQ-BS'];
+    const parts = targetGroupStr.split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.includes('ALL')) return ['SQ', 'QNCN', 'HSQ-BS'];
+    return Array.from(new Set(parts));
+  };
+
+  // Helper to build targetGroup string from array of selected group keys
+  const buildTargetGroupString = (selectedList: string[]): string => {
+    const allGroups = ['SQ', 'QNCN', 'HSQ-BS'];
+    const hasAll = allGroups.every(g => selectedList.includes(g));
+    if (hasAll || selectedList.length === 0) return 'ALL';
+    return selectedList.join(', ');
   };
 
   // Helper: format for display (ngày DD/MM/YYYY)
   const formatDateDisplay = (dateInput?: string | Date | number): string => {
     if (!dateInput) return '';
+    if (typeof dateInput === 'string') {
+      if (dateInput.endsWith('Z')) {
+        const d = new Date(dateInput);
+        if (!isNaN(d.getTime())) {
+          const pad = (n: number) => String(n).padStart(2, '0');
+          return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+        }
+      } else if (dateInput.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+        const parts = dateInput.substring(0, 10).split('-');
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    }
     const d = new Date(dateInput);
     if (isNaN(d.getTime())) return String(dateInput);
     const pad = (n: number) => String(n).padStart(2, '0');
@@ -331,6 +412,199 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Helper to format duration in minutes & seconds
+  const formatDuration = (seconds?: number) => {
+    if (!seconds || seconds <= 0) return '< 1 phút';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins === 0) return `${secs} giây`;
+    return `${mins} phút ${secs > 0 ? `${secs} giây` : ''}`;
+  };
+
+  // Resolve questions for selected submission detail modal
+  useEffect(() => {
+    if (!selectedSubmissionForDetail) {
+      setDetailQuestions([]);
+      setDetailQuestionsSource('');
+      return;
+    }
+
+    // If submission already has full answer records with questions
+    if (selectedSubmissionForDetail.answers && selectedSubmissionForDetail.answers.length > 0) {
+      setDetailQuestions([]);
+      setDetailQuestionsSource('recorded_answers');
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingDetailQuestions(true);
+
+    const fetchDetailQuestions = async () => {
+      try {
+        const sub = selectedSubmissionForDetail;
+        
+        // 1. Try matching session by id or title in state
+        let matchedSession = sessions.find(s => s.id === sub.sessionId || s.title?.trim().toLowerCase() === sub.sessionTitle?.trim().toLowerCase());
+        
+        if (matchedSession?.questions && matchedSession.questions.length > 0) {
+          if (isMounted) {
+            const count = (matchedSession.totalQuestions && matchedSession.totalQuestions <= matchedSession.questions.length)
+              ? matchedSession.totalQuestions
+              : (sub.totalQuestions && sub.totalQuestions <= matchedSession.questions.length ? sub.totalQuestions : matchedSession.questions.length);
+            setDetailQuestions(matchedSession.questions.slice(0, count));
+            setDetailQuestionsSource(matchedSession.title);
+            setIsLoadingDetailQuestions(false);
+          }
+          return;
+        }
+
+        // 2. Try session's bankId
+        if (matchedSession?.bankId) {
+          let matchedBank = banks.find(b => b.id === matchedSession?.bankId);
+          if (!matchedBank?.questions || matchedBank.questions.length === 0) {
+            try {
+              matchedBank = await api.getExamBank(matchedSession.bankId);
+            } catch {}
+          }
+          if (matchedBank?.questions && matchedBank.questions.length > 0) {
+            if (isMounted) {
+              const count = sub.totalQuestions && sub.totalQuestions <= matchedBank.questions.length
+                ? sub.totalQuestions
+                : (matchedSession.totalQuestions || matchedBank.questions.length);
+              setDetailQuestions(matchedBank.questions.slice(0, count));
+              setDetailQuestionsSource(matchedBank.title || matchedSession.title);
+              setIsLoadingDetailQuestions(false);
+            }
+            return;
+          }
+        }
+
+        // 3. Try matching bank in state by sessionTitle
+        const bankMatch = banks.find(b => 
+          b.title?.trim().toLowerCase().includes(sub.sessionTitle?.trim().toLowerCase()) ||
+          sub.sessionTitle?.trim().toLowerCase().includes(b.title?.trim().toLowerCase())
+        );
+        if (bankMatch?.questions && bankMatch.questions.length > 0) {
+          if (isMounted) {
+            setDetailQuestions(bankMatch.questions.slice(0, sub.totalQuestions || 20));
+            setDetailQuestionsSource(bankMatch.title);
+            setIsLoadingDetailQuestions(false);
+          }
+          return;
+        }
+
+        // 4. Try fetching session doc directly from Firestore
+        if (sub.sessionId) {
+          try {
+            const sSnap = await getDoc(doc(db, 'exam_sessions', sub.sessionId));
+            if (sSnap.exists()) {
+              const sData = sSnap.data() as ExamSession;
+              if (sData.questions && sData.questions.length > 0) {
+                if (isMounted) {
+                  const count = sub.totalQuestions && sub.totalQuestions <= sData.questions.length ? sub.totalQuestions : (sData.totalQuestions || sData.questions.length);
+                  setDetailQuestions(sData.questions.slice(0, count));
+                  setDetailQuestionsSource(sData.title);
+                  setIsLoadingDetailQuestions(false);
+                }
+                return;
+              }
+              if (sData.bankId) {
+                const bSnap = await getDoc(doc(db, 'exam_banks', sData.bankId));
+                if (bSnap.exists() && bSnap.data()?.questions?.length > 0) {
+                  if (isMounted) {
+                    const qArr = bSnap.data().questions;
+                    const count = sub.totalQuestions && sub.totalQuestions <= qArr.length ? sub.totalQuestions : (sData.totalQuestions || qArr.length);
+                    setDetailQuestions(qArr.slice(0, count));
+                    setDetailQuestionsSource(bSnap.data().title || sData.title);
+                    setIsLoadingDetailQuestions(false);
+                  }
+                  return;
+                }
+              }
+            }
+          } catch (fetchErr) {
+            console.warn('Direct Firestore fetch error:', fetchErr);
+          }
+        }
+
+        // Fallback: check any bank with questions
+        if (banks.length > 0 && banks[0].questions && banks[0].questions.length > 0) {
+          if (isMounted) {
+            setDetailQuestions(banks[0].questions.slice(0, sub.totalQuestions || 20));
+            setDetailQuestionsSource(banks[0].title);
+          }
+        } else {
+          if (isMounted) {
+            setDetailQuestions([]);
+            setDetailQuestionsSource('');
+          }
+        }
+      } catch (err) {
+        console.error('Error resolving submission questions:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoadingDetailQuestions(false);
+        }
+      }
+    };
+
+    fetchDetailQuestions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedSubmissionForDetail, sessions, banks]);
+
+  // Open account exam detail modal (Chi tiết các lượt thi theo đợt kiểm tra) for a submission
+  const handleOpenAccountDetailForSubmission = (sub: ExamSubmission) => {
+    const userSubmissions = submissions.filter(s => {
+      const isUserMatch = (sub.userId && s.userId === sub.userId) || 
+        (s.userName && sub.userName && s.userName.trim().toLowerCase() === sub.userName.trim().toLowerCase());
+      if (!isUserMatch) return false;
+
+      // Filter strictly by the current exam session
+      if (sub.sessionId && s.sessionId) {
+        return s.sessionId === sub.sessionId;
+      }
+      if (sub.sessionTitle && s.sessionTitle) {
+        return s.sessionTitle.trim().toLowerCase() === sub.sessionTitle.trim().toLowerCase();
+      }
+      return true;
+    });
+
+    // Sort by submitted time descending (latest attempt first)
+    userSubmissions.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+
+    const matchedUser = users.find(u => 
+      (sub.userId && u.id === sub.userId) || 
+      (u.fullName && sub.userName && u.fullName.trim().toLowerCase() === sub.userName.trim().toLowerCase()) ||
+      (u.name && sub.userName && u.name.trim().toLowerCase() === sub.userName.trim().toLowerCase())
+    );
+    const list = userSubmissions.length > 0 ? userSubmissions : [sub];
+    const highest = Math.max(...list.map(s => s.score || 0));
+
+    setSelectedAccountForExamDetail({
+      user: matchedUser || {
+        id: sub.userId || `user-${sub.userName}`,
+        fullName: sub.userName,
+        name: sub.userName,
+        email: matchedUser?.email || `${sub.userName.toLowerCase().replace(/\s+/g, '')}@v4.hq`,
+        role: matchedUser?.role || 'user',
+        rank: sub.userRank || 'Quân nhân',
+        position: sub.userPosition,
+        unitId: matchedUser?.unitId || '',
+        unitName: sub.unitName || ''
+      },
+      rank: sub.userRank || matchedUser?.rank || 'Quân nhân',
+      position: sub.userPosition || matchedUser?.position,
+      unitName: sub.unitName || matchedUser?.unitName || '',
+      examCount: list.length,
+      highestScore: highest,
+      submissions: list,
+      sessionFilterTitle: sub.sessionTitle || ''
+    });
   };
 
   // Handle Excel File Selected
@@ -489,12 +763,11 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       const pool = bankQuestions.length > 0 ? bankQuestions : (editingSession?.questions || []);
       const selectedQuestions = api.pickRandomQuestions(pool, requestedCount);
       
-      const startIso = sessionFormData.startTime
-        ? (sessionFormData.startTime.includes('T') ? sessionFormData.startTime : convertDateToStartOfDayIso(sessionFormData.startTime))
-        : convertDateToStartOfDayIso(formatForDateInput(new Date()));
-      const endIso = sessionFormData.endTime
-        ? (sessionFormData.endTime.includes('T') ? sessionFormData.endTime : convertDateToEndOfDayIso(sessionFormData.endTime))
-        : convertDateToEndOfDayIso(formatForDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+      const startDatePart = formatForDateInput(sessionFormData.startTime) || formatForDateInput(new Date());
+      const endDatePart = formatForDateInput(sessionFormData.endTime) || formatForDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
+      const startIso = convertDateToStartOfDayIso(startDatePart);
+      const endIso = convertDateToEndOfDayIso(endDatePart);
 
       if (startIso && endIso && new Date(endIso).getTime() < new Date(startIso).getTime()) {
         alert('Lỗi: Ngày kết thúc không thể trước ngày bắt đầu. Vui lòng chọn lại ngày kết thúc!');
@@ -760,9 +1033,67 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     setIsSubmittingTest(false);
   };
 
-  // Filtered submissions for Report view
+  // Extract only the highest-score submission per soldier per exam session for reporting
+  const bestSubmissions = useMemo(() => {
+    const bestMap = new Map<string, ExamSubmission>();
+
+    submissions.forEach((s) => {
+      // Must be real exam submission from an exam session, not from lesson assessment questions
+      if (
+        s.id?.startsWith('sub-sync-') ||
+        s.id?.startsWith('sub-sample-') ||
+        s.id?.startsWith('sub-seed-') ||
+        s.sessionId === 'session-default' ||
+        (s as any).isSimulator
+      ) {
+        return;
+      }
+
+      // Key combination: unique soldier identifier + exam session identifier
+      const uKey = (s.userId && s.userId.trim()) ? s.userId.trim() : (s.userName || '').trim().toLowerCase();
+      const sessKey = (s.sessionId && s.sessionId.trim()) ? s.sessionId.trim() : (s.sessionTitle || '').trim().toLowerCase();
+      const key = `${uKey}___${sessKey}`;
+
+      if (!bestMap.has(key)) {
+        bestMap.set(key, s);
+      } else {
+        const existing = bestMap.get(key)!;
+        const currentScore = Number(s.score) || 0;
+        const existingScore = Number(existing.score) || 0;
+
+        if (currentScore > existingScore) {
+          bestMap.set(key, s);
+        } else if (currentScore === existingScore) {
+          // If scores are equal, keep the most recent submission
+          const currentTime = new Date(s.submittedAt || 0).getTime();
+          const existingTime = new Date(existing.submittedAt || 0).getTime();
+          if (currentTime > existingTime) {
+            bestMap.set(key, s);
+          }
+        }
+      }
+    });
+
+    return Array.from(bestMap.values());
+  }, [submissions]);
+
+  // All official exam sessions available across created sessions and submitted competition results
+  const availableSessions = useMemo(() => {
+    const map = new Map<string, { id: string; title: string }>();
+    sessions.forEach(s => {
+      map.set(s.id, { id: s.id, title: s.title });
+    });
+    submissions.forEach(s => {
+      if (s.sessionId && !map.has(s.sessionId)) {
+        map.set(s.sessionId, { id: s.sessionId, title: s.sessionTitle || s.sessionId });
+      }
+    });
+    return Array.from(map.values());
+  }, [sessions, submissions]);
+
+  // Filtered best submissions for Report view (highest score per exam per soldier)
   const filteredReportSubmissions = useMemo(() => {
-    return submissions.filter(s => {
+    return bestSubmissions.filter(s => {
       const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
       const matchUnit = selectedUnitFilter === 'ALL' || !selectedUnitFilter || s.unitName === selectedUnitFilter || (s.unitName && selectedUnitFilter && matchSearch(s.unitName, selectedUnitFilter));
       const matchSearchQuery = !searchCandidateQuery.trim() || 
@@ -772,7 +1103,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
         matchSearch(s.sessionTitle, searchCandidateQuery);
       return matchSession && matchUnit && matchSearchQuery;
     });
-  }, [submissions, selectedSessionFilter, selectedUnitFilter, searchCandidateQuery]);
+  }, [bestSubmissions, selectedSessionFilter, selectedUnitFilter, searchCandidateQuery]);
 
   const filteredUsersForReport = useMemo(() => {
     return users.filter(u => {
@@ -790,106 +1121,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     });
   }, [users, selectedUnitFilter, searchCandidateQuery]);
 
-  const accountReportData = useMemo(() => {
-    // Extract session timestamp of selectedSessionFilter if any
-    let sessionTimestamp = 0;
-    let selectedSessionTitle = '';
-    if (selectedSessionFilter && selectedSessionFilter !== 'ALL') {
-      const match = selectedSessionFilter.match(/\d+/);
-      if (match) {
-        sessionTimestamp = parseInt(match[0]);
-      }
-      const sess = sessions.find(s => s.id === selectedSessionFilter || s.title === selectedSessionFilter);
-      if (sess) {
-        selectedSessionTitle = sess.title;
-      }
-    }
-
-    return filteredUsersForReport.map(u => {
-      const userProgress = progressList.filter(p => p.userId === u.id);
-      const totalLessons = userProgress.length;
-      const completedLessons = userProgress.filter(p => p.completed).length;
-      const avgProgress = totalLessons > 0 
-        ? Number((userProgress.reduce((sum, p) => sum + (p.overallProgress || 0), 0) / totalLessons).toFixed(2))
-        : 0;
-
-      // Real submissions matching selected filters
-      const userSubs = submissions.filter(s => {
-        const isUserMatch = s.userId === u.id || (s.userName && s.userName === (u.fullName || u.name));
-        const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
-        return isUserMatch && matchSession;
-      });
-
-      // Historical/Legacy values
-      const totalExamsCount = Number((u as any).totalExamsCount || 0);
-      const passedExamsCount = Number((u as any).passedExamsCount || 0);
-
-      // Check if user's last exam was taken for this specific session
-      const isLastExamForThisSession = 
-        selectedSessionFilter !== 'ALL' && 
-        selectedSessionFilter && 
-        (u as any).lastExamTime && 
-        sessionTimestamp > 0 && 
-        ((u as any).lastExamTime >= sessionTimestamp - 60000);
-
-      // We include legacy/profile stats for this user if we are showing ALL sessions, OR if their last exam corresponds to the selected session
-      const includeLegacy = selectedSessionFilter === 'ALL' || !selectedSessionFilter || isLastExamForThisSession;
-      
-      const examCount = includeLegacy ? Math.max(userSubs.length, totalExamsCount) : userSubs.length;
-      const passedCount = includeLegacy ? Math.max(userSubs.filter(s => s.passed).length, passedExamsCount) : userSubs.filter(s => s.passed).length;
-
-      // Highest score calculation
-      let highestScore = userSubs.length > 0 ? Math.max(...userSubs.map(s => s.score)) : 0;
-      if (includeLegacy) {
-        if ((u as any).lastExamScore !== undefined) {
-          const lastExamTotal = (u as any).lastExamTotal || 10;
-          const lastExamScore = Number((u as any).lastExamScore || 0);
-          const scoreVal = lastExamTotal > 0 ? (lastExamScore / lastExamTotal) * 10 : lastExamScore;
-          highestScore = Math.max(highestScore, scoreVal);
-        }
-        if ((u as any).lastScore !== undefined) {
-          const percentage = (u as any).lastScorePercentage || 0;
-          const scoreVal = percentage > 0 ? (percentage / 10) : Number((u as any).lastScore || 0);
-          highestScore = Math.max(highestScore, scoreVal);
-        }
-      }
-
-      // Generate text describing the exam history
-      let examSummaryText = userSubs.map(s => {
-        return `${s.sessionTitle || 'Đợt kiểm tra'}: ${s.score}đ (${s.passed ? 'Đạt' : 'Chưa đạt'})`;
-      }).join('; ');
-
-      if (examSummaryText === '' && includeLegacy && ((u as any).lastExamScore !== undefined || (u as any).lastScore !== undefined)) {
-        let lastScoreStr = '';
-        if ((u as any).lastExamScore !== undefined) {
-          const lastExamTotal = (u as any).lastExamTotal || 10;
-          lastScoreStr = `${(u as any).lastExamScore}/${lastExamTotal}`;
-        } else if ((u as any).lastScore !== undefined) {
-          lastScoreStr = `${(u as any).lastScore}/10`;
-        }
-        
-        const passed = (u as any).lastExamPassed !== false;
-        const sTitle = selectedSessionTitle || (u as any).lastLessonTitle || 'Đợt kiểm tra';
-        examSummaryText = `${sTitle}: ${lastScoreStr}đ (${passed ? 'Đạt' : 'Chưa đạt'})`;
-      }
-
-      return {
-        user: u,
-        totalLessons,
-        completedLessons,
-        avgProgress,
-        examCount,
-        highestScore,
-        passedCount,
-        examSummaryText,
-        unitName: u.unitName || u.unit || 'Chưa xếp đơn vị',
-        rank: u.rank || u.userRank || '—',
-        position: u.position || u.userPosition || '—'
-      };
-    });
-  }, [filteredUsersForReport, progressList, submissions, selectedSessionFilter, sessions]);
-
-  // Aggregate stats per Unit for detailed score report
+  // Aggregate stats per Unit for detailed score report (Strictly from real exam submissions)
   const unitStatsList = useMemo(() => {
     const map: Record<string, {
       unitName: string;
@@ -926,8 +1158,15 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       });
     }
 
-    accountReportData.forEach(d => {
-      const uName = d.unitName || 'Chưa xếp đơn vị';
+    // Aggregate directly from real exam submissions matching selected session & unit filters
+    const submissionsForUnitStats = bestSubmissions.filter(s => {
+      const matchSession = selectedSessionFilter === 'ALL' || !selectedSessionFilter || s.sessionId === selectedSessionFilter || s.sessionTitle === selectedSessionFilter;
+      const matchUnit = selectedUnitFilter === 'ALL' || !selectedUnitFilter || s.unitName === selectedUnitFilter || (s.unitName && selectedUnitFilter && matchSearch(s.unitName, selectedUnitFilter));
+      return matchSession && matchUnit;
+    });
+
+    submissionsForUnitStats.forEach(s => {
+      const uName = s.unitName || 'Chưa xếp đơn vị';
       if (!map[uName]) {
         map[uName] = {
           unitName: uName,
@@ -945,27 +1184,29 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       }
       
       const stat = map[uName];
+      const score = Number(s.score) || 0;
+      const isPassed = s.passed ?? (score >= 5.0);
 
-      // If this user/soldier took an exam
-      if (d.examCount > 0) {
-        stat.total += 1; // 1 quân nhân dự thi
-        if (d.passedCount > 0 || d.highestScore >= 5.0) {
-          stat.passed += 1; // 1 quân nhân ĐẠT
-        } else {
-          stat.failed += 1; // 1 quân nhân CHƯA ĐẠT
-        }
-
-        // Aggregate scores based on soldier's performance
-        const effectiveScore = d.highestScore;
-        stat.sumScore += effectiveScore;
-        if (effectiveScore > stat.maxScore) stat.maxScore = effectiveScore;
-        if (effectiveScore < stat.minScore) stat.minScore = effectiveScore;
-
-        if (effectiveScore >= 8.0) stat.excellentCount += 1;
-        else if (effectiveScore >= 6.5) stat.goodCount += 1;
-        else if (effectiveScore >= 5.0) stat.averageCount += 1;
-        else stat.poorCount += 1;
+      stat.total += 1;
+      if (isPassed) {
+        stat.passed += 1;
+      } else {
+        stat.failed += 1;
       }
+
+      stat.sumScore += score;
+      if (stat.total === 1) {
+        stat.maxScore = score;
+        stat.minScore = score;
+      } else {
+        if (score > stat.maxScore) stat.maxScore = score;
+        if (score < stat.minScore) stat.minScore = score;
+      }
+
+      if (score >= 8.0) stat.excellentCount += 1;
+      else if (score >= 6.5) stat.goodCount += 1;
+      else if (score >= 5.0) stat.averageCount += 1;
+      else stat.poorCount += 1;
     });
 
     return Object.values(map)
@@ -995,53 +1236,17 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           avgScoreNum,
           avgScore,
           passRate,
-          minScoreDisplay: u.total > 0 && u.minScore !== 10 ? u.minScore : 0,
+          minScoreDisplay: u.total > 0 ? u.minScore : 0,
           rankLabel,
           rankColor
         };
       })
       .sort((a, b) => b.passRate - a.passRate || b.avgScoreNum - a.avgScoreNum);
-  }, [accountReportData, units, selectedUnitFilter, submissions, selectedSessionFilter]);
-
-  const handleExportAccountReportToExcel = () => {
-    if (accountReportData.length === 0) {
-      alert('Không có dữ liệu tài khoản để xuất file Excel');
-      return;
-    }
-
-    const rows = accountReportData.map((d, idx) => ({
-      'STT': idx + 1,
-      'Họ và tên': d.user.fullName || d.user.name || '',
-      'Cấp bậc / Chức vụ': `${d.rank} • ${d.position}`,
-      'Đơn vị': d.unitName,
-      'Email': d.user.email || '',
-      'Số bài đang học': d.totalLessons,
-      'Số bài hoàn thành': d.completedLessons,
-      'Tiến độ học tập TB (%)': `${Number(d.avgProgress).toFixed(2)}%`,
-      'Số lượt thi': d.examCount,
-      'Điểm số cao nhất': d.highestScore,
-      'Số lần ĐẠT': d.passedCount,
-      'Chi tiết các đợt thi': d.examSummaryText
-    }));
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 6 }, { wch: 30 }, { wch: 25 }, { wch: 20 }, { wch: 25 },
-      { wch: 15 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 },
-      { wch: 12 }, { wch: 45 }
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'Bao_Cao_Tung_Tai_Khoan');
-    XLSX.writeFile(wb, `BAO_CAO_TIEN_DO_HOC_VA_KIEM_TRA_TUNG_TAI_KHOAN.xlsx`);
-  };
+  }, [bestSubmissions, units, selectedSessionFilter, selectedUnitFilter]);
 
   // Export Results Report to Excel with 2 detailed Worksheets (Unit Summary & Candidate Detail)
   const handleExportSubmissionsToExcel = (sessionTitle?: string) => {
-    const filteredSubs = submissions.filter(s => {
-      const matchSession = selectedSessionFilter === 'ALL' || s.sessionId === selectedSessionFilter;
-      const matchUnit = selectedUnitFilter === 'ALL' || s.unitName === selectedUnitFilter;
-      return matchSession && matchUnit;
-    });
+    const filteredSubs = filteredReportSubmissions;
 
     if (filteredSubs.length === 0) {
       alert('Không có dữ liệu bài làm để xuất file Excel');
@@ -1074,7 +1279,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       'Cấp bậc / Chức vụ': `${s.userRank || ''} ${s.userPosition ? `• ${s.userPosition}` : ''}`,
       'Đơn vị': s.unitName,
       'Số câu đúng': `${s.correctCount}/${s.totalQuestions}`,
-      'Điểm số (/10)': s.score,
+      'Điểm số': s.score,
       'Kết quả': s.passed ? 'ĐẠT' : 'CHƯA ĐẠT',
       'Thời gian làm bài': `${Math.floor(s.timeSpentSeconds / 60)} phút ${s.timeSpentSeconds % 60} giây`,
       'Thời gian nộp bài': new Date(s.submittedAt).toLocaleString('vi-VN')
@@ -1184,7 +1389,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           }`}
         >
           <BarChart3 className="w-4 h-4" />
-          <span>Tổng Hợp Báo Cáo Kết Quả ({submissions.length})</span>
+          <span>Tổng Hợp Báo Cáo Kết Quả ({bestSubmissions.length})</span>
         </button>
       </div>
 
@@ -1238,7 +1443,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[10px] font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-bold">
-                            Đối tượng: {session.targetGroup === 'SQ' ? 'Sĩ quan (SQ)' : session.targetGroup === 'QNCN' ? 'QNCN' : 'Tất cả'}
+                            Đối tượng: {formatTargetGroupDisplay(session.targetGroup)}
                           </span>
                         </div>
                       </div>
@@ -1246,11 +1451,6 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                       <h3 className="text-base font-bold text-slate-900 hover:text-blue-600 transition-colors">
                         {session.title}
                       </h3>
-                      {session.description && (
-                        <p className="text-xs text-slate-600 mt-1 line-clamp-2">
-                          {session.description}
-                        </p>
-                      )}
 
                       {/* Thời gian diễn ra đợt thi */}
                       {(session.startTime || session.endTime) && (
@@ -1487,10 +1687,15 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           {/* Report Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-900 text-white p-4 rounded-2xl shadow-sm border border-slate-800">
             <div>
-              <h3 className="font-extrabold text-sm flex items-center gap-2 text-emerald-400">
-                <BarChart3 className="w-4 h-4" />
-                <span>Tổng Hợp Báo Cáo Kết Quả Thi Trực Tuyến</span>
-              </h3>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-extrabold text-sm flex items-center gap-2 text-emerald-400">
+                  <BarChart3 className="w-4 h-4" />
+                  <span>Tổng Hợp Báo Cáo Kết Quả Thi Trực Tuyến</span>
+                </h3>
+                <span className="text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2.5 py-0.5 rounded-full">
+                  ✓ Lấy kết quả cao nhất từng bài thi của mỗi quân nhân
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1532,7 +1737,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
               </div>
               <div>
                 <span className="block text-[11px] font-bold text-slate-500 uppercase">Điểm trung bình</span>
-                <span className="text-xl font-black text-amber-700">{avgScore} / 10</span>
+                <span className="text-xl font-black text-amber-700">{avgScore}</span>
               </div>
             </div>
           </div>
@@ -1548,7 +1753,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                   className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 font-bold text-slate-800 focus:outline-none focus:border-blue-500"
                 >
                   <option value="ALL">-- Tất cả các đợt thi --</option>
-                  {sessions.map(s => (
+                  {availableSessions.map(s => (
                     <option key={s.id} value={s.id}>{s.title}</option>
                   ))}
                 </select>
@@ -1568,28 +1773,26 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                 </select>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">Tìm kiếm quân nhân</label>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Họ tên, đơn vị..."
-                    value={searchCandidateQuery}
-                    onChange={(e) => setSearchCandidateQuery(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-blue-500 w-48"
-                  />
+              {reportViewMode === 'candidate' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">Tìm kiếm quân nhân</label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Họ tên, đơn vị..."
+                      value={searchCandidateQuery}
+                      onChange={(e) => setSearchCandidateQuery(e.target.value)}
+                      className="bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-slate-800 focus:outline-none focus:border-blue-500 w-48"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             <button
               onClick={() => {
-                if (reportViewMode === 'account') {
-                  handleExportAccountReportToExcel();
-                } else {
-                  handleExportSubmissionsToExcel(selectedSessionForReport?.title);
-                }
+                handleExportSubmissionsToExcel(selectedSessionForReport?.title);
               }}
               className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold shadow-sm transition-all cursor-pointer"
             >
@@ -1622,18 +1825,6 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             >
               <Users className="w-4 h-4 text-blue-600" />
               <span>Bảng Điểm Chi Tiết Quân Nhân ({filteredReportSubmissions.length})</span>
-            </button>
-
-            <button
-              onClick={() => setReportViewMode('account')}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-xl transition-all ${
-                reportViewMode === 'account'
-                  ? 'bg-white text-blue-800 shadow-sm border border-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <TrendingUp className="w-4 h-4 text-emerald-600" />
-              <span>Báo Cáo Học Tập & Kiểm Tra Từng Tài Khoản ({users.length})</span>
             </button>
           </div>
 
@@ -1669,7 +1860,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                         <th className="p-3.5 text-center">Sĩ số dự thi</th>
                         <th className="p-3.5 text-center">Kết quả ĐẠT</th>
                         <th className="p-3.5 text-center">Tỷ lệ ĐẠT</th>
-                        <th className="p-3.5 text-center">Điểm TB (/10)</th>
+                        <th className="p-3.5 text-center">Điểm trung bình</th>
                         <th className="p-3.5 text-center">Biên độ điểm (Min - Max)</th>
                         <th className="p-3.5">Phân bổ Thang Điểm (Giỏi - Khá - TB - Yếu)</th>
                         <th className="p-3.5 text-center">Xếp Loại Thi Đua</th>
@@ -1703,7 +1894,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                             </div>
                           </td>
                           <td className="p-3.5 text-center font-mono font-black text-amber-800 text-sm">
-                            {unitStat.avgScore} / 10
+                            {unitStat.avgScore}
                           </td>
                           <td className="p-3.5 text-center font-mono text-slate-600 text-[11px]">
                             Thấp nhất: <span className="font-bold text-rose-600">{unitStat.minScoreDisplay}</span> | Cao nhất: <span className="font-bold text-emerald-700">{unitStat.maxScore}</span>
@@ -1773,7 +1964,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                         <th className="p-3.5">Đơn vị</th>
                         <th className="p-3.5">Đợt kiểm tra</th>
                         <th className="p-3.5 text-center">Số câu đúng</th>
-                        <th className="p-3.5 text-center">Điểm số (/10)</th>
+                        <th className="p-3.5 text-center">Điểm số</th>
                         <th className="p-3.5 text-center">Kết quả</th>
                         <th className="p-3.5 text-right">Thời gian nộp</th>
                         <th className="p-3.5 text-center">Chi tiết</th>
@@ -1815,119 +2006,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                           </td>
                           <td className="p-3.5 text-center">
                             <button
-                              onClick={() => setSelectedSubmissionForDetail(sub)}
-                              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
-                              title="Xem chi tiết câu trả lời"
+                              onClick={() => handleOpenAccountDetailForSubmission(sub)}
+                              className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200/80 transition-all font-bold text-xs inline-flex items-center space-x-1.5 shadow-2xs hover:shadow-xs cursor-pointer"
+                              title="Xem chi tiết các lượt thi theo đợt kiểm tra này"
                             >
-                              <Eye className="w-3.5 h-3.5" />
+                              <Eye className="w-3.5 h-3.5 text-blue-600" />
+                              <span>Chi tiết</span>
                             </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* VIEW MODE 3: COMPREHENSIVE STUDY & EXAM REPORT PER ACCOUNT */}
-          {reportViewMode === 'account' && (
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm">
-              <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2">
-                  <TrendingUp className="w-4 h-4 text-emerald-400" />
-                  <span>Báo Cáo Tổng Hợp Tốc Độ Học Tập & Kết Quả Kiểm Tra Theo Từng Tài Khoản ({accountReportData.length} tài khoản)</span>
-                </h3>
-              </div>
-
-              {accountReportData.length === 0 ? (
-                <div className="p-12 text-center text-slate-500 text-xs space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-                    <Users className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-slate-700 text-sm">Không tìm thấy tài khoản người dùng nào</p>
-                    <p className="text-slate-500 text-xs mt-1 max-w-md mx-auto">
-                      Hãy thay đổi bộ lọc đơn vị hoặc kiểm tra lại từ khóa tìm kiếm.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase text-[10px] tracking-wider">
-                        <th className="p-3.5 w-12 text-center">STT</th>
-                        <th className="p-3.5">Họ và tên quân nhân</th>
-                        <th className="p-3.5">Cấp bậc / Chức vụ</th>
-                        <th className="p-3.5">Đơn vị</th>
-                        <th className="p-3.5 text-center">Bài đã học</th>
-                        <th className="p-3.5">Tiến độ Học TB</th>
-                        <th className="p-3.5 text-center">Số lượt thi</th>
-                        <th className="p-3.5 text-center">Điểm cao nhất</th>
-                        <th className="p-3.5">Chi tiết đợt thi đã tham gia</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                      {accountReportData.map((d, idx) => (
-                        <tr key={d.user.id || `acc-rep-${idx}`} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="p-3.5 text-center font-mono text-slate-500">{idx + 1}</td>
-                          <td className="p-3.5">
-                            <div>
-                              <span className="font-bold text-slate-900 block text-sm">{d.user.fullName || d.user.name}</span>
-                              <span className="text-[11px] text-slate-400 font-mono block mt-0.5">{d.user.email}</span>
-                            </div>
-                          </td>
-                          <td className="p-3.5 text-slate-600">
-                            {d.rank} {d.position ? `• ${d.position}` : ''}
-                          </td>
-                          <td className="p-3.5">
-                            <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px] font-semibold border border-slate-200">
-                              {d.unitName}
-                            </span>
-                          </td>
-                          <td className="p-3.5 text-center font-mono font-bold text-slate-700 text-sm">
-                            {d.completedLessons} / {d.totalLessons} bài
-                          </td>
-                          <td className="p-3.5">
-                            <div className="flex items-center space-x-2">
-                              <div className="w-16 bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
-                                <div
-                                  className={`h-full ${d.avgProgress >= 80 ? 'bg-emerald-500' : d.avgProgress >= 50 ? 'bg-blue-500' : 'bg-slate-400'}`}
-                                  style={{ width: `${d.avgProgress}%` }}
-                                />
-                              </div>
-                              <span className="font-mono font-black text-slate-700 text-[11px]">{Number(d.avgProgress).toFixed(2)}%</span>
-                            </div>
-                          </td>
-                          <td className="p-3.5 text-center font-mono font-bold text-blue-700 text-sm">
-                            {d.examCount} lượt
-                          </td>
-                          <td className="p-3.5 text-center font-mono font-black text-sm">
-                            {d.examCount > 0 ? (
-                              <span className={d.highestScore >= 5.0 ? 'text-emerald-700' : 'text-rose-600'}>
-                                {d.highestScore} / 10
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 font-medium">Chưa thi</span>
-                            )}
-                          </td>
-                          <td className="p-3.5 max-w-xs">
-                            {d.examCount > 0 ? (
-                              <div className="flex flex-col gap-1">
-                                {submissions.filter(s => s.userId === d.user.id).map(s => (
-                                  <div key={s.id} className="text-[10px] leading-tight flex items-center gap-1">
-                                    <span className="text-slate-500 font-bold truncate max-w-[120px]" title={s.sessionTitle}>{s.sessionTitle}:</span>
-                                    <span className={`px-1 rounded-sm font-mono font-bold ${s.passed ? 'bg-emerald-50 text-emerald-800 border border-emerald-100' : 'bg-rose-50 text-rose-800 border border-rose-100'}`}>
-                                      {s.score}đ ({s.passed ? 'Đạt' : 'Chưa đạt'})
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-400">Chưa ghi nhận bài thi nào</span>
-                            )}
                           </td>
                         </tr>
                       ))}
@@ -2125,30 +2210,91 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
               </div>
 
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Mô tả nội dung đợt thi (không bắt buộc)</label>
-                <textarea
-                  rows={2}
-                  placeholder="Nhập ghi chú hướng dẫn hoặc nội dung trọng tâm đợt kiểm tra..."
-                  value={sessionFormData.description}
-                  onChange={(e) => setSessionFormData({ ...sessionFormData, description: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">
+                <label className="block text-slate-700 font-bold mb-2">
                   Chọn đối tượng tham gia <span className="text-red-500">*</span>
                 </label>
-                <select
-                  required
-                  value={sessionFormData.targetGroup}
-                  onChange={(e) => setSessionFormData({ ...sessionFormData, targetGroup: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-bold cursor-pointer"
-                >
-                  <option value="ALL">Tất cả (Sĩ quan & QNCN)</option>
-                  <option value="SQ">Sĩ quan (SQ)</option>
-                  <option value="QNCN">Quân nhân chuyên nghiệp (QNCN)</option>
-                </select>
+
+                {(() => {
+                  const currentSelected = parseTargetGroups(sessionFormData.targetGroup);
+                  const isAllSelected = sessionFormData.targetGroup === 'ALL' || (currentSelected.length === 3);
+
+                  const toggleGroup = (groupKey: string) => {
+                    if (groupKey === 'ALL') {
+                      setSessionFormData({ ...sessionFormData, targetGroup: 'ALL' });
+                      return;
+                    }
+                    let nextSelected: string[];
+                    if (isAllSelected) {
+                      nextSelected = [groupKey];
+                    } else if (currentSelected.includes(groupKey)) {
+                      nextSelected = currentSelected.filter(g => g !== groupKey);
+                    } else {
+                      nextSelected = [...currentSelected, groupKey];
+                    }
+                    setSessionFormData({
+                      ...sessionFormData,
+                      targetGroup: buildTargetGroupString(nextSelected)
+                    });
+                  };
+
+                  return (
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup('ALL')}
+                        className={`w-full text-left px-3 py-2 rounded-xl border text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                          isAllSelected
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`w-4 h-4 rounded-md border flex items-center justify-center text-[10px] ${
+                            isAllSelected ? 'bg-white text-blue-600 border-white font-extrabold' : 'border-slate-300 bg-slate-50'
+                          }`}>
+                            {isAllSelected ? '✓' : ''}
+                          </span>
+                          <span>Tất cả (SQ, QNCN & HSQ-BS)</span>
+                        </div>
+                        <span className="text-[10px] opacity-80 font-mono">3/3 đối tượng</span>
+                      </button>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                        {[
+                          { key: 'SQ', label: 'Sĩ quan (SQ)' },
+                          { key: 'QNCN', label: 'QNCN' },
+                          { key: 'HSQ-BS', label: 'HSQ-BS' }
+                        ].map((item) => {
+                          const isChecked = currentSelected.includes(item.key);
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onClick={() => toggleGroup(item.key)}
+                              className={`text-left px-3 py-2 rounded-xl border text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer ${
+                                isChecked
+                                  ? 'bg-blue-50 border-blue-500 text-blue-900 shadow-2xs font-bold'
+                                  : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                              }`}
+                            >
+                              <span className={`w-4 h-4 rounded-md border flex items-center justify-center text-[10px] shrink-0 ${
+                                isChecked ? 'bg-blue-600 text-white border-blue-600 font-bold' : 'border-slate-300 bg-slate-50'
+                              }`}>
+                                {isChecked ? '✓' : ''}
+                              </span>
+                              <span className="truncate">{item.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="text-[11px] text-slate-500 pt-1 px-1 flex items-center justify-between border-t border-slate-200/60 mt-1">
+                        <span>Đã chọn: <strong className="text-blue-700 font-bold">{formatTargetGroupDisplay(sessionFormData.targetGroup)}</strong></span>
+                        <span className="text-[10px] text-slate-400">Có thể chọn 1, nhiều hoặc tất cả</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -2622,7 +2768,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                   </div>
                   <div>
                     <span className="block text-slate-400">Điểm số</span>
-                    <span className="text-lg font-bold text-amber-400">{testResultSummary.score} / 10</span>
+                    <span className="text-lg font-bold text-amber-400">{testResultSummary.score}</span>
                   </div>
                   <div>
                     <span className="block text-slate-400">Thời gian làm thử</span>
@@ -2696,60 +2842,500 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: SUBMISSION CANDIDATE DETAIL */}
       {/* ========================================================= */}
       {selectedSubmissionForDetail && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[85vh] flex flex-col">
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[70] flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-400 shadow-inner shrink-0">
+                  <Award className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold uppercase tracking-wider text-white">
+                    Kết Quả Bài Làm Chi Tiết Của Quân Nhân
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-300 mt-0.5">
+                    <span>Quân nhân: <strong className="text-white font-bold">{selectedSubmissionForDetail.userName}</strong></span>
+                    <span>•</span>
+                    <span>{selectedSubmissionForDetail.userRank || 'Quân nhân'} {selectedSubmissionForDetail.userPosition ? `• ${selectedSubmissionForDetail.userPosition}` : ''}</span>
+                    <span>•</span>
+                    <span className="text-blue-300 font-semibold">{selectedSubmissionForDetail.unitName}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                {selectedAccountForExamDetail && (
+                  <button
+                    onClick={() => setSelectedSubmissionForDetail(null)}
+                    className="px-3 py-1.5 rounded-xl bg-blue-600/80 hover:bg-blue-600 text-white border border-blue-400/40 flex items-center space-x-1.5 text-xs font-bold transition-colors cursor-pointer shadow-xs"
+                    title="Quay lại bảng danh sách các đợt thi của quân nhân"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                    <span className="hidden sm:inline">Trở lại danh sách đợt thi</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => window.print()}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 flex items-center space-x-1.5 text-xs font-bold transition-colors cursor-pointer"
+                  title="In phiếu kết quả"
+                >
+                  <Printer className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="hidden sm:inline">In kết quả</span>
+                </button>
+                <button
+                  onClick={() => setSelectedSubmissionForDetail(null)}
+                  className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors font-bold text-xs cursor-pointer"
+                  title="Đóng"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Scorecard KPI Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-4 bg-slate-50/80 border-b border-slate-200 shrink-0">
+              {/* Box 1: Điểm số & Xếp loại */}
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                  Điểm số bài thi
+                </span>
+                <div className="flex items-baseline space-x-2">
+                  <span className={`text-2xl sm:text-3xl font-black font-mono tracking-tight ${
+                    selectedSubmissionForDetail.score >= 5.0 ? 'text-emerald-700' : 'text-rose-600'
+                  }`}>
+                    {selectedSubmissionForDetail.score}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    selectedSubmissionForDetail.passed
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                  }`}>
+                    {selectedSubmissionForDetail.passed ? 'ĐẠT' : 'CHƯA ĐẠT'}
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  Thang điểm 10 chuẩn
+                </span>
+              </div>
+
+              {/* Box 2: Số câu đúng */}
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                  Số câu đúng
+                </span>
+                <div className="flex items-baseline space-x-1">
+                  <span className="text-xl sm:text-2xl font-black font-mono text-blue-700">
+                    {selectedSubmissionForDetail.correctCount}
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    / {selectedSubmissionForDetail.totalQuestions} câu
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
+                  <div
+                    className="bg-blue-600 h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(100, Math.round((selectedSubmissionForDetail.correctCount / (selectedSubmissionForDetail.totalQuestions || 20)) * 100))}%`
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] text-blue-600 font-bold block mt-1">
+                  {Math.round((selectedSubmissionForDetail.correctCount / (selectedSubmissionForDetail.totalQuestions || 20)) * 100)}% chính xác
+                </span>
+              </div>
+
+              {/* Box 3: Số câu chưa đúng */}
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                  Số câu chưa đúng
+                </span>
+                <div className="flex items-baseline space-x-1">
+                  <span className="text-xl sm:text-2xl font-black font-mono text-amber-700">
+                    {Math.max(0, (selectedSubmissionForDetail.totalQuestions || 20) - selectedSubmissionForDetail.correctCount)}
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    / {selectedSubmissionForDetail.totalQuestions} câu
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
+                  <div
+                    className="bg-amber-500 h-full rounded-full transition-all"
+                    style={{
+                      width: `${Math.min(100, 100 - Math.round((selectedSubmissionForDetail.correctCount / (selectedSubmissionForDetail.totalQuestions || 20)) * 100))}%`
+                    }}
+                  />
+                </div>
+                <span className="text-[10px] text-amber-600 font-medium block mt-1">
+                  {100 - Math.round((selectedSubmissionForDetail.correctCount / (selectedSubmissionForDetail.totalQuestions || 20)) * 100)}% sai / chưa chọn
+                </span>
+              </div>
+
+              {/* Box 4: Thời gian làm bài */}
+              <div className="bg-white p-3 rounded-2xl border border-slate-200/80 shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                  Thời gian làm bài
+                </span>
+                <span className="text-lg sm:text-xl font-black font-mono text-slate-800 block">
+                  {formatDuration(selectedSubmissionForDetail.timeSpentSeconds)}
+                </span>
+                <span className="text-[10px] text-slate-400 block mt-1.5">
+                  Tốc độ: ~{((selectedSubmissionForDetail.timeSpentSeconds || 0) / (selectedSubmissionForDetail.totalQuestions || 20)).toFixed(1)}s / câu
+                </span>
+              </div>
+            </div>
+
+            {/* Exam Meta Strip */}
+            <div className="bg-white px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+              <div className="flex items-center space-x-2 text-slate-700">
+                <FileText className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="text-slate-500">Đợt kiểm tra:</span>
+                <strong className="text-slate-900 font-bold">{selectedSubmissionForDetail.sessionTitle}</strong>
+              </div>
+              <div className="flex items-center space-x-3 text-[11px] text-slate-500">
+                <span>
+                  Thời điểm nộp: <strong className="text-slate-700 font-mono">{new Date(selectedSubmissionForDetail.submittedAt).toLocaleTimeString('vi-VN')} {new Date(selectedSubmissionForDetail.submittedAt).toLocaleDateString('vi-VN')}</strong>
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200/60 font-semibold">
+                  <Smartphone className="w-3 h-3" />
+                  <span>Android App Vùng 4</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Scrollable Questions & Answers Body */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs flex-1 bg-slate-50/40">
+              {/* CASE 1: Has recorded per-question answers */}
+              {selectedSubmissionForDetail.answers && selectedSubmissionForDetail.answers.length > 0 && (
+                <div className="space-y-3">
+                  <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-2xl flex items-start space-x-2.5 text-blue-900">
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold block">Chi tiết đáp án từng câu bài làm của thí sinh:</span>
+                      <span className="text-[11px] text-blue-700">
+                        Hệ thống đối chiếu giữa lựa chọn của quân nhân và đáp án chuẩn chính xác của bộ đề thi.
+                      </span>
+                    </div>
+                  </div>
+
+                  {selectedSubmissionForDetail.answers.map((ans, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-4 rounded-2xl border space-y-2.5 transition-colors bg-white ${
+                        ans.isCorrect ? 'border-emerald-200 shadow-2xs' : 'border-rose-200 shadow-2xs'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="font-bold text-slate-900 flex items-start gap-2">
+                          <span className="px-2 py-0.5 rounded-md bg-slate-100 text-blue-800 font-mono font-bold text-xs shrink-0 border border-slate-200">
+                            Câu #{idx + 1}
+                          </span>
+                          <span className="text-sm font-semibold text-slate-900 leading-relaxed">
+                            {ans.questionText}
+                          </span>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-black shrink-0 border ${
+                            ans.isCorrect
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                              : 'bg-rose-50 text-rose-800 border-rose-300'
+                          }`}
+                        >
+                          {ans.isCorrect ? '✓ ĐÚNG' : '✕ CHƯA ĐÚNG'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
+                        <div className={`p-2.5 rounded-xl border flex items-center space-x-2 ${
+                          ans.isCorrect ? 'bg-emerald-50/60 border-emerald-200 text-emerald-950 font-bold' : 'bg-rose-50/60 border-rose-200 text-rose-950 font-semibold'
+                        }`}>
+                          <span className="text-slate-500 font-normal text-[11px]">Thí sinh chọn:</span>
+                          <span className="px-2 py-0.5 rounded bg-white font-mono font-black border text-xs">
+                            Đáp án {String.fromCharCode(65 + ans.selectedOption)}
+                          </span>
+                        </div>
+
+                        {!ans.isCorrect && (
+                          <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200 text-emerald-950 flex items-center space-x-2 font-bold">
+                            <span className="text-slate-500 font-normal text-[11px]">Đáp án đúng:</span>
+                            <span className="px-2 py-0.5 rounded bg-emerald-600 text-white font-mono font-black text-xs">
+                              Đáp án {String.fromCharCode(65 + ans.correctOption)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* CASE 2: No recorded answers in sub, but detail questions resolved from Session/Bank */}
+              {(!selectedSubmissionForDetail.answers || selectedSubmissionForDetail.answers.length === 0) && detailQuestions.length > 0 && (
+                <div className="space-y-3">
+                  <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-2xl flex items-start space-x-3 text-slate-800 shadow-2xs">
+                    <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs font-bold text-xs mt-0.5">
+                      <Check className="w-4 h-4" />
+                    </div>
+                    <div className="text-xs space-y-1">
+                      <div className="font-bold text-blue-950 text-sm flex items-center gap-2">
+                        <span>Đề thi chính thức: {detailQuestionsSource || selectedSubmissionForDetail.sessionTitle}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold border border-blue-200">
+                          {detailQuestions.length} câu hỏi
+                        </span>
+                      </div>
+                      <p className="text-slate-600 leading-relaxed text-[11px]">
+                        Bài làm được nộp trực tiếp từ <strong>Ứng dụng di động (Android App)</strong>. Kết quả tổng hợp đạt: <strong className="text-blue-700 font-bold">{selectedSubmissionForDetail.correctCount}/{selectedSubmissionForDetail.totalQuestions} câu đúng</strong> ({selectedSubmissionForDetail.score} điểm • {selectedSubmissionForDetail.passed ? 'ĐẠT' : 'CHƯA ĐẠT'}). Dưới đây là danh sách đầy đủ toàn bộ câu hỏi và <strong>đáp án chuẩn chính thức</strong> của đợt thi để chỉ huy và cán bộ phụ trách đối chiếu bài thi.
+                      </p>
+                    </div>
+                  </div>
+
+                  {detailQuestions.map((q, qIdx) => (
+                    <div
+                      key={q.id || qIdx}
+                      className="p-4 rounded-2xl border border-slate-200/90 bg-white shadow-2xs space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5">
+                          <span className="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-800 font-mono font-black text-xs shrink-0 border border-slate-200 shadow-2xs">
+                            Câu #{q.stt || (qIdx + 1)}
+                          </span>
+                          <span className="text-sm font-bold text-slate-900 leading-snug">
+                            {q.question}
+                          </span>
+                        </div>
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-semibold shrink-0 border border-slate-200">
+                          Trắc nghiệm
+                        </span>
+                      </div>
+
+                      {/* Options Grid */}
+                      {Array.isArray(q.options) && q.options.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                          {q.options.map((opt, optIdx) => {
+                            const isCorrect = (q.correctOptionIndex === optIdx) || (q.correctAnswerText && q.correctAnswerText.trim().toLowerCase() === opt.trim().toLowerCase());
+                            return (
+                              <div
+                                key={optIdx}
+                                className={`p-3 rounded-xl border transition-all flex items-start space-x-2.5 ${
+                                  isCorrect
+                                    ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950 font-semibold ring-1 ring-emerald-400/40 shadow-2xs'
+                                    : 'bg-slate-50/60 border-slate-200 text-slate-700'
+                                }`}
+                              >
+                                <span className={`w-5 h-5 rounded-full flex items-center justify-center font-mono font-bold text-xs shrink-0 mt-0.5 ${
+                                  isCorrect
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'bg-slate-200 text-slate-700'
+                                }`}>
+                                  {String.fromCharCode(65 + optIdx)}
+                                </span>
+                                <div className="flex-1 text-xs leading-relaxed">
+                                  <span>{opt}</span>
+                                  {isCorrect && (
+                                    <span className="block mt-1 text-[10px] font-bold text-emerald-700">
+                                      ✓ Đáp án chuẩn chính thức
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Explanation note if available */}
+                      {q.explanation && (
+                        <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/80 text-amber-900 text-[11px] flex items-start space-x-2">
+                          <HelpCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <strong className="font-bold">Giải thích: </strong>
+                            <span>{q.explanation}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* CASE 3: Loading questions */}
+              {isLoadingDetailQuestions && (
+                <div className="p-12 text-center text-slate-500 space-y-3">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-blue-600" />
+                  <p className="text-xs font-semibold">Đang tải bộ câu hỏi và đáp án chi tiết từ hệ thống...</p>
+                </div>
+              )}
+
+              {/* CASE 4: Fallback if no detailed questions could be loaded */}
+              {!isLoadingDetailQuestions && (!selectedSubmissionForDetail.answers || selectedSubmissionForDetail.answers.length === 0) && detailQuestions.length === 0 && (
+                <div className="p-8 text-center bg-white rounded-2xl border border-slate-200 space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center mx-auto">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">Kết quả tổng hợp đã ghi nhận an toàn</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                      Quân nhân <strong>{selectedSubmissionForDetail.userName}</strong> đã hoàn thành đợt thi với kết quả <strong>{selectedSubmissionForDetail.correctCount}/{selectedSubmissionForDetail.totalQuestions} câu đúng</strong> ({selectedSubmissionForDetail.score} điểm • {selectedSubmissionForDetail.passed ? 'ĐẠT' : 'CHƯA ĐẠT'}). Bộ câu hỏi đang được đồng bộ tiếp từ ngân hàng đề thi.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs shrink-0">
+              <span className="text-[11px] text-slate-500 hidden sm:inline">
+                Hệ thống Quản lý Giáo dục Chính trị & Thi Trực tuyến — Vùng 4 Hải quân
+              </span>
+              <div className="flex items-center space-x-2 ml-auto">
+                {selectedAccountForExamDetail && (
+                  <button
+                    onClick={() => setSelectedSubmissionForDetail(null)}
+                    className="px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-xs border border-blue-300 shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
+                  >
+                    <ArrowRight className="w-3.5 h-3.5 rotate-180" />
+                    <span>Trở lại danh sách đợt thi</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => window.print()}
+                  className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-800 font-bold text-xs border border-slate-300 shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-600" />
+                  <span>In phiếu kết quả</span>
+                </button>
+                <button
+                  onClick={() => setSelectedSubmissionForDetail(null)}
+                  className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition-colors cursor-pointer"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: ACCOUNT EXAM SUBMISSIONS DETAIL */}
+      {/* ========================================================= */}
+      {selectedAccountForExamDetail && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            {/* Header */}
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="text-sm font-bold uppercase tracking-wider">
-                  Chi Tiết Bài Làm: {selectedSubmissionForDetail.userName}
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  {selectedSubmissionForDetail.unitName} • Điểm: {selectedSubmissionForDetail.score}/10 ({selectedSubmissionForDetail.passed ? 'ĐẠT' : 'CHƯA ĐẠT'})
-                </p>
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-blue-600/30 border border-blue-400/30 flex items-center justify-center text-blue-400 font-bold">
+                  <Eye className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold uppercase tracking-wider">
+                    {selectedAccountForExamDetail.sessionFilterTitle
+                      ? 'Chi Tiết Các Lượt Thi Đợt Kiểm Tra'
+                      : 'Chi Tiết Các Đợt Thi Đã Tham Gia'}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-300 mt-0.5">
+                    <span className="font-bold text-white text-xs">
+                      {selectedAccountForExamDetail.user.fullName || selectedAccountForExamDetail.user.name}
+                    </span>
+                    <span>•</span>
+                    <span>{selectedAccountForExamDetail.rank} {selectedAccountForExamDetail.position ? `• ${selectedAccountForExamDetail.position}` : ''}</span>
+                    <span>•</span>
+                    <span className="text-blue-300 font-semibold">{selectedAccountForExamDetail.unitName}</span>
+                    {selectedAccountForExamDetail.sessionFilterTitle && (
+                      <>
+                        <span>•</span>
+                        <span className="text-amber-300 font-bold">
+                          {selectedAccountForExamDetail.sessionFilterTitle}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
               <button
-                onClick={() => setSelectedSubmissionForDetail(null)}
-                className="text-slate-400 hover:text-white text-xs font-bold"
+                onClick={() => setSelectedAccountForExamDetail(null)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors font-bold text-xs cursor-pointer"
+                title="Đóng"
               >
                 ✕
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto space-y-3 text-xs flex-1">
-              {(!selectedSubmissionForDetail.answers || selectedSubmissionForDetail.answers.length === 0) ? (
-                <p className="text-slate-500">Không có dữ liệu câu trả lời chi tiết.</p>
-              ) : (
-                selectedSubmissionForDetail.answers.map((ans, idx) => (
-                  <div
-                    key={idx}
-                    className={`p-3.5 rounded-2xl border space-y-1.5 ${
-                      ans.isCorrect ? 'bg-emerald-50/50 border-emerald-200' : 'bg-rose-50/50 border-rose-200'
-                    }`}
-                  >
-                    <div className="font-bold text-slate-900 flex items-start gap-1.5">
-                      <span className="font-mono text-blue-700">Câu #{idx + 1}:</span>
-                      <span>{ans.questionText}</span>
-                    </div>
+            {/* Quick summary strip */}
+            <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center space-x-4">
+                <span className="text-slate-500 font-medium">
+                  Tổng số lượt thi: <strong className="text-blue-700 font-bold font-mono">{selectedAccountForExamDetail.submissions.length} lượt</strong>
+                </span>
+                <span className="text-slate-500 font-medium">
+                  Điểm cao nhất: <strong className="text-emerald-700 font-bold font-mono">{selectedAccountForExamDetail.highestScore}</strong>
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Email tài khoản: <span className="font-mono text-slate-600 font-semibold">{selectedAccountForExamDetail.user.email}</span>
+              </span>
+            </div>
 
-                    <div className="flex items-center space-x-3 text-[11px]">
-                      <span className={ans.isCorrect ? 'text-emerald-700 font-bold' : 'text-rose-700 font-bold'}>
-                        Lựa chọn của thí sinh: Đáp án {String.fromCharCode(65 + ans.selectedOption)}
-                      </span>
-                      {!ans.isCorrect && (
-                        <span className="text-emerald-800 font-bold">
-                          (Đáp án đúng: {String.fromCharCode(65 + ans.correctOption)})
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))
+            {/* Submissions List */}
+            <div className="p-5 overflow-y-auto flex-1 text-xs">
+              {selectedAccountForExamDetail.submissions.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 italic">
+                  Chưa có lịch sử làm bài thi nào của quân nhân này.
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase text-[10px] tracking-wider">
+                        <th className="p-3 w-10 text-center">STT</th>
+                        <th className="p-3">Đợt kiểm tra</th>
+                        <th className="p-3 text-center">Số câu đúng</th>
+                        <th className="p-3 text-center">Điểm số</th>
+                        <th className="p-3 text-center">Kết quả</th>
+                        <th className="p-3 text-right">Thời gian nộp</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                      {selectedAccountForExamDetail.submissions.map((s, idx) => (
+                        <tr key={s.id || idx} className="hover:bg-blue-50/30 transition-colors">
+                          <td className="p-3 text-center font-mono text-slate-500">{idx + 1}</td>
+                          <td className="p-3">
+                            <span className="font-bold text-slate-900 block">{s.sessionTitle || 'Đợt kiểm tra'}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">{s.sessionId}</span>
+                          </td>
+                          <td className="p-3 text-center font-mono font-bold text-blue-700">
+                            {s.correctCount} / {s.totalQuestions}
+                          </td>
+                          <td className="p-3 text-center font-mono font-black text-sm">
+                            <span className={s.score >= 5.0 ? 'text-emerald-700' : 'text-rose-600'}>
+                              {s.score}
+                            </span>
+                          </td>
+                          <td className="p-3 text-center">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              s.passed 
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border border-rose-200'
+                            }`}>
+                              {s.passed ? 'ĐẠT' : 'CHƯA ĐẠT'}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right text-slate-500 text-[11px]">
+                            {new Date(s.submittedAt).toLocaleTimeString('vi-VN')} {new Date(s.submittedAt).toLocaleDateString('vi-VN')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
 
+            {/* Footer */}
             <div className="p-3 bg-slate-50 border-t border-slate-200 text-right shrink-0">
               <button
-                onClick={() => setSelectedSubmissionForDetail(null)}
-                className="px-4 py-1.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs"
+                onClick={() => setSelectedAccountForExamDetail(null)}
+                className="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs transition-colors cursor-pointer"
               >
                 Đóng
               </button>

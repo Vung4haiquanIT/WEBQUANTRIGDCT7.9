@@ -442,7 +442,13 @@ export function App() {
                 onRefresh={fetchAllData}
               />
             ) : currentView === 'progress' ? (
-              <ProgressView progressList={progressList} units={units} />
+              <ProgressView
+                progressList={progressList}
+                units={units}
+                users={users}
+                courses={courses}
+                lessons={lessons}
+              />
             ) : currentView === 'notifications' ? (
               <NotificationsView
                 notifications={notifications}

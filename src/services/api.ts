@@ -824,10 +824,10 @@ export const api = {
     const unit: Unit = {
       id,
       name: data.name || 'Đơn vị mới',
-      code: data.code || 'DV-01',
+      code: data.code || '',
       type: data.type || 'BRIGADE',
       description: data.description || '',
-      memberCount: data.memberCount || 100,
+      memberCount: data.memberCount || 0,
       commander: data.commander || '',
       politicalOfficer: data.politicalOfficer || '',
       order: data.order || 1,
@@ -971,8 +971,8 @@ export const api = {
       password: isInactive ? `__LOCKED__${realPassword}` : realPassword,
       originalPassword: realPassword,
       role: firestoreRole,
-      targetGroup: data.targetGroup || (data.rank?.includes('CN') ? 'QNCN' : 'SQ'),
-      doiTuong: data.doiTuong || data.targetGroup || (data.rank?.includes('CN') ? 'QNCN' : 'SQ'),
+      targetGroup: data.targetGroup || (data.rank?.includes('CN') ? 'QNCN' : (data.rank?.includes('SĨ') || data.rank?.includes('Sĩ') || data.rank?.includes('Binh') || data.rank?.includes('BINH')) ? 'HSQ-BS' : 'SQ'),
+      doiTuong: data.doiTuong || data.targetGroup || (data.rank?.includes('CN') ? 'QNCN' : (data.rank?.includes('SĨ') || data.rank?.includes('Sĩ') || data.rank?.includes('Binh') || data.rank?.includes('BINH')) ? 'HSQ-BS' : 'SQ'),
       rank: data.rank || 'Đại úy',
       position: data.position || 'Trợ lý',
       rankAndPosition: rankAndPos,
@@ -1012,8 +1012,8 @@ export const api = {
     return await firestoreService.updateUserAndSync(id, data);
   },
 
-  getUserPersonalCloudData: async (userId: string) => {
-    return await firestoreService.getUserPersonalCloudData(userId);
+  getUserPersonalCloudData: async (userId: string, userObj?: Partial<User>) => {
+    return await firestoreService.getUserPersonalCloudData(userId, userObj);
   },
 
   deleteUser: async (id: string): Promise<{ success: boolean }> => {

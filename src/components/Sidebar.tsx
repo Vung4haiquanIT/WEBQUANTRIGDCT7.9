@@ -59,15 +59,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'courses' as NavTab,
-      label: 'GIÁO DỤC CHÍNH TRỊ',
+      label: 'CHUYÊN ĐỀ HỌC TẬP',
       icon: BookOpen,
       badge: null,
     },
     {
+      id: 'progress' as NavTab,
+      label: 'TIẾN ĐỘ HỌC TẬP',
+      icon: TrendingUp,
+      badge: null,
+    },
+    {
       id: 'exams' as NavTab,
-      label: 'ĐỀ KIỂM TRA EXCEL',
+      label: 'KIỂM TRA TRẮC NGHIỆM',
       icon: FileSpreadsheet,
-      badge: 'MỚI',
+      badge: null,
     },
     {
       id: 'radio' as NavTab,
@@ -100,14 +106,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: 'APP',
     },
     {
-      id: 'progress' as NavTab,
-      label: 'TIẾN ĐỘ HỌC TẬP',
-      icon: TrendingUp,
-      badge: null,
-    },
-    {
       id: 'notifications' as NavTab,
-      label: 'THÔNG BÁO',
+      label: 'THÔNG BÁO - CHỈ THỊ',
       icon: Bell,
       badge: null,
     },
