@@ -495,16 +495,21 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                   className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden transition-all"
                 >
                   {/* Course Header Bar */}
-                  <div className="p-4 lg:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 bg-slate-50/80">
+                  <div
+                    onClick={() => toggleCourseExpand(course.id)}
+                    className={`p-4 lg:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50/80 hover:bg-slate-100/80 transition-colors cursor-pointer select-none group/header ${
+                      isExpanded ? 'border-b border-slate-200' : ''
+                    }`}
+                  >
                     <div className="flex items-center space-x-3 flex-1 min-w-0">
-                      <button
-                        onClick={() => toggleCourseExpand(course.id)}
-                        className="p-1.5 rounded-lg bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 shrink-0 shadow-sm"
+                      <div
+                        className="p-1.5 rounded-lg bg-white text-slate-700 group-hover/header:bg-blue-50 group-hover/header:text-blue-600 border border-slate-200 shrink-0 shadow-sm transition-colors"
+                        title={isExpanded ? 'Thu gọn bài học' : 'Mở rộng danh sách bài học'}
                       >
                         {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                      </button>
+                      </div>
 
-                      <div className="w-14 h-14 rounded-2xl bg-slate-200 overflow-hidden shrink-0 border border-slate-200 shadow-sm">
+                      <div className="w-14 h-14 rounded-2xl bg-slate-200 overflow-hidden shrink-0 border border-slate-200 shadow-sm group-hover/header:border-blue-300 transition-colors">
                         <img src={course.thumbnail} alt={course.title} className="w-full h-full object-cover" />
                       </div>
 
@@ -528,16 +533,22 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                               ? 'Nội bộ'
                               : 'Chờ thẩm định'}
                           </span>
+                          <span className="text-[11px] text-slate-400 font-medium ml-1">
+                            ({courseLessons.length} bài học)
+                          </span>
                         </div>
 
-                        <h3 className="text-base font-bold text-slate-900 mt-1 truncate">
+                        <h3 className="text-base font-bold text-slate-900 mt-1 truncate group-hover/header:text-blue-700 transition-colors">
                           {course.title}
                         </h3>
                       </div>
                     </div>
 
                     {/* Course Actions */}
-                    <div className="flex items-center space-x-2 shrink-0 self-end md:self-center">
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center space-x-2 shrink-0 self-end md:self-center"
+                    >
                       <button
                         onClick={() => handleOpenNewLesson(course.id)}
                         className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200 transition-colors"

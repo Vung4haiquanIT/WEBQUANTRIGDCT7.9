@@ -292,6 +292,11 @@ export function App() {
     await fetchAllData();
   };
 
+  const handleDeleteUnit = async (id: string, unitName?: string) => {
+    await api.deleteUnit(id, unitName);
+    await fetchAllData();
+  };
+
   // -------------------------------------------------------------
   // Notification Handlers
   // -------------------------------------------------------------
@@ -433,6 +438,7 @@ export function App() {
                 users={users}
                 onCreateUnit={handleCreateUnit}
                 onUpdateUnit={handleUpdateUnit}
+                onDeleteUnit={handleDeleteUnit}
               />
             ) : currentView === 'banners' ? (
               <BannersView

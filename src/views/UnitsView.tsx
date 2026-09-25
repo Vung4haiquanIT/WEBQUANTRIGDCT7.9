@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plus, Users, Edit3, CheckCircle2 } from 'lucide-react';
+import { Plus, Users, Edit3, CheckCircle2, Trash2, AlertTriangle, AlertCircle } from 'lucide-react';
 import { Unit, User } from '../types';
 
 interface UnitsViewProps {
@@ -7,6 +7,7 @@ interface UnitsViewProps {
   users?: User[];
   onCreateUnit: (unit: Partial<Unit>) => Promise<any>;
   onUpdateUnit: (id: string, unit: Partial<Unit>) => Promise<void>;
+  onDeleteUnit?: (id: string, unitName?: string) => Promise<void>;
 }
 
 export const UnitsView: React.FC<UnitsViewProps> = ({
@@ -14,6 +15,7 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
   users = [],
   onCreateUnit,
   onUpdateUnit,
+  onDeleteUnit,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
@@ -24,6 +26,11 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
     commander: '',
     politicalOfficer: '',
   });
+
+  const [unitToDelete, setUnitToDelete] = useState<Unit | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
 
   const handleOpenNew = () => {
     setEditingUnit(null);
@@ -45,6 +52,32 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
       politicalOfficer: u.politicalOfficer || '',
     });
     setIsModalOpen(true);
+  };
+
+  const handleRequestDelete = (u: Unit) => {
+    setDeleteErrorMessage(null);
+    setUnitToDelete(u);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!unitToDelete) return;
+    setIsDeleting(true);
+    setDeleteErrorMessage(null);
+    try {
+      if (onDeleteUnit) {
+        await onDeleteUnit(unitToDelete.id, unitToDelete.name);
+      }
+      setSuccessToast(`Đã xóa đơn vị "${unitToDelete.name}" thành công`);
+      setUnitToDelete(null);
+      setTimeout(() => {
+        setSuccessToast(null);
+      }, 3500);
+    } catch (err: any) {
+      console.error('Lỗi xóa đơn vị:', err);
+      setDeleteErrorMessage(err.message || 'Không thể xóa đơn vị. Vui lòng thử lại.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -153,13 +186,22 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
                   <CheckCircle2 className="w-3 h-3 text-emerald-500" />
                   <span>Hoạt động</span>
                 </span>
-                <button
-                  onClick={() => handleOpenEdit(unit)}
-                  className="p-1.5 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 transition-colors border border-slate-200 cursor-pointer"
-                  title="Chỉnh sửa đơn vị"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    onClick={() => handleOpenEdit(unit)}
+                    className="p-1.5 rounded-lg bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-blue-600 transition-colors border border-slate-200 cursor-pointer"
+                    title="Chỉnh sửa đơn vị"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => handleRequestDelete(unit)}
+                    className="p-1.5 rounded-lg bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-colors border border-slate-200 cursor-pointer"
+                    title="Xóa đơn vị"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -220,28 +262,128 @@ export const UnitsView: React.FC<UnitsViewProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting || !formData.name.trim()}
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center space-x-1.5"
-                >
-                  {isSubmitting && (
-                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  )}
-                  <span>{editingUnit ? 'Lưu thay đổi' : 'Tạo đơn vị'}</span>
-                </button>
+              <div className="flex items-center justify-between pt-2">
+                {editingUnit ? (
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      const target = editingUnit;
+                      setIsModalOpen(false);
+                      handleRequestDelete(target);
+                    }}
+                    className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-semibold transition-colors flex items-center space-x-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xóa đơn vị này</span>
+                  </button>
+                ) : <div />}
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || !formData.name.trim()}
+                    className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center space-x-1.5"
+                  >
+                    {isSubmitting && (
+                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    )}
+                    <span>{editingUnit ? 'Lưu thay đổi' : 'Tạo đơn vị'}</span>
+                  </button>
+                </div>
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Modal Confirm Delete Unit */}
+      {unitToDelete && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[60] flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col p-6 animate-scale-up">
+            <div className="flex items-center space-x-3 mb-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0 shadow-xs">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Xác nhận xóa đơn vị</h3>
+                <p className="text-xs text-slate-500 font-medium">{unitToDelete.name}</p>
+              </div>
+            </div>
+
+            {(() => {
+              const uCount = getUserCountForUnit(unitToDelete);
+              return uCount > 0 ? (
+                <div className="my-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start space-x-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold">Cảnh báo liên kết tài khoản:</p>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Đơn vị này hiện có <strong>{uCount} tài khoản</strong> quân nhân đang trực thuộc. Nếu bạn xóa, các tài khoản này vẫn được lưu giữ nhưng sẽ không còn thuộc đơn vị nào.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="my-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-xs flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                  <p className="leading-relaxed">
+                    Bạn có chắc chắn muốn xóa đơn vị <strong>{unitToDelete.name}</strong> không? Hành động này sẽ loại bỏ đơn vị khỏi danh sách hệ thống.
+                  </p>
+                </div>
+              );
+            })()}
+
+            {deleteErrorMessage && (
+              <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-medium">
+                {deleteErrorMessage}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end space-x-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setUnitToDelete(null)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-50 flex items-center space-x-1.5"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Đang xóa...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Xác nhận xóa</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Notification */}
+      {successToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-600 text-white px-4 py-3 rounded-2xl shadow-lg flex items-center space-x-2 text-xs font-semibold animate-slide-up">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>{successToast}</span>
         </div>
       )}
     </div>

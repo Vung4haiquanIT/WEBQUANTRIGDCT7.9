@@ -1969,6 +1969,25 @@ export const firestoreService = {
       .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'vi', { numeric: true, sensitivity: 'base' }));
   },
 
+  deleteUnit: async (id: string, unitName?: string): Promise<{ success: boolean }> => {
+    try {
+      await deleteDoc(doc(db, 'units', id));
+    } catch (err) {
+      console.warn('deleteDoc unit failed in firestoreService:', err);
+    }
+    if (unitName) {
+      try {
+        const snap = await getDocs(query(collection(db, 'units'), where('name', '==', unitName)));
+        for (const d of snap.docs) {
+          if (d.id !== id) {
+            await deleteDoc(d.ref).catch(() => {});
+          }
+        }
+      } catch (_) {}
+    }
+    return { success: true };
+  },
+
   // -------------------------------------------------------------
   // USERS
   // -------------------------------------------------------------

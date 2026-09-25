@@ -1,0 +1,169 @@
+<svg viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dong Son Bronze Drum (Trống đồng Đông Sơn / Ngọc Lũ) Authentic Vector Motif -->
+  <defs>
+    <!-- Single Chim Lac (Dong Son Crane in flight counter-clockwise) -->
+    <g id="chim-lac">
+      <!-- Head crest & long beak -->
+      <path d="M 205,52 Q 222,50 232,54 Q 235,53 240,49 Q 244,46 250,44 C 244,48 240,53 238,57 Q 248,60 258,61 C 268,62 278,63 286,62" 
+            stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+      <!-- Beak lower line & throat -->
+      <path d="M 205,52 Q 220,53 230,57 Q 236,62 244,64 Q 256,66 268,65" 
+            stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none" />
+      <!-- Crane Eye -->
+      <circle cx="230" cy="53" r="1.4" fill="currentColor" />
+      <!-- Outstretched primary flight wing -->
+      <path d="M 246,60 C 250,48 258,38 270,35 C 265,42 263,50 264,59" 
+            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" />
+      <!-- Wing feather vanes -->
+      <path d="M 252,49 L 268,41 M 256,53 L 272,46 M 260,57 L 274,52" 
+            stroke="currentColor" stroke-width="1.1" stroke-linecap="round" />
+      <!-- Fanned tail feathers -->
+      <path d="M 284,62 C 294,60 302,57 308,54 C 304,59 298,64 288,66" 
+            stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" />
+      <path d="M 286,64 C 296,65 304,65 310,63 C 304,68 296,69 286,67" 
+            stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none" />
+      <!-- Trailing legs -->
+      <path d="M 272,65 Q 282,70 292,72 M 274,66 Q 284,72 294,75" 
+            stroke="currentColor" stroke-width="1.1" stroke-linecap="round" />
+    </g>
+
+    <!-- Peacock feather / lotus bud ornament between star rays -->
+    <g id="star-interspace">
+      <path d="M 250,175 L 250,215" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+      <path d="M 245,188 L 250,183 L 255,188" stroke="currentColor" stroke-width="1.1" fill="none" />
+      <path d="M 243,197 L 250,191 L 257,197" stroke="currentColor" stroke-width="1.1" fill="none" />
+      <path d="M 242,206 L 250,200 L 258,206" stroke="currentColor" stroke-width="1.1" fill="none" />
+      <circle cx="250" cy="177" r="1.5" fill="currentColor" />
+    </g>
+  </defs>
+
+  <!-- Outer Rim Bands -->
+  <circle cx="250" cy="250" r="246" stroke="currentColor" stroke-width="2.5" />
+  <circle cx="250" cy="250" r="242" stroke="currentColor" stroke-width="1" stroke-dasharray="2.5 3.5" />
+  <circle cx="250" cy="250" r="238" stroke="currentColor" stroke-width="1.8" />
+
+  <!-- Outer Sawtooth Ring (Vành hoa văn răng lược ngoài) -->
+  <circle cx="250" cy="250" r="234" stroke="currentColor" stroke-width="1" />
+  <circle cx="250" cy="250" r="226" stroke="currentColor" stroke-width="1" />
+  <g stroke="currentColor" stroke-width="1.1">
+    <!-- 48 sawteeth around outer ring -->
+    <path d="
+      M 250,16 L 253,24 L 256,16 L 259,24 L 262,16 L 265,24 L 268,16 L 271,24
+    " fill="none" />
+    <!-- Repeated via circle dash-array simulation for precision -->
+    <circle cx="250" cy="250" r="230" stroke="currentColor" stroke-width="6" stroke-dasharray="3.5 5.5" fill="none" stroke-opacity="0.85" />
+  </g>
+
+  <!-- Outer Tangent Circles Band (Vòng tròn tiếp tuyến ngoài có chấm tâm) -->
+  <circle cx="250" cy="250" r="224" stroke="currentColor" stroke-width="1.4" />
+  <circle cx="250" cy="250" r="214" stroke="currentColor" stroke-width="1.4" />
+  <!-- Tangent circles ring -->
+  <circle cx="250" cy="250" r="219" stroke="currentColor" stroke-width="3" stroke-dasharray="3 6" fill="none" />
+  <circle cx="250" cy="250" r="219" stroke="currentColor" stroke-width="1" stroke-dasharray="0.1 9" stroke-linecap="round" />
+
+  <!-- Outer Bird Separator Border -->
+  <circle cx="250" cy="250" r="212" stroke="currentColor" stroke-width="1.5" />
+  <circle cx="250" cy="250" r="208" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" />
+  <circle cx="250" cy="250" r="205" stroke="currentColor" stroke-width="1.5" />
+
+  <!-- VÀNH CHIM LẠC (16 CHIM HẠC BAY NGƯỢC CHIỀU KIM ĐỒNG HỒ) -->
+  <g id="chim-lac-ring">
+    <use href="#chim-lac" transform="rotate(0 250 250)" />
+    <use href="#chim-lac" transform="rotate(22.5 250 250)" />
+    <use href="#chim-lac" transform="rotate(45 250 250)" />
+    <use href="#chim-lac" transform="rotate(67.5 250 250)" />
+    <use href="#chim-lac" transform="rotate(90 250 250)" />
+    <use href="#chim-lac" transform="rotate(112.5 250 250)" />
+    <use href="#chim-lac" transform="rotate(135 250 250)" />
+    <use href="#chim-lac" transform="rotate(157.5 250 250)" />
+    <use href="#chim-lac" transform="rotate(180 250 250)" />
+    <use href="#chim-lac" transform="rotate(202.5 250 250)" />
+    <use href="#chim-lac" transform="rotate(225 250 250)" />
+    <use href="#chim-lac" transform="rotate(247.5 250 250)" />
+    <use href="#chim-lac" transform="rotate(270 250 250)" />
+    <use href="#chim-lac" transform="rotate(292.5 250 250)" />
+    <use href="#chim-lac" transform="rotate(315 250 250)" />
+    <use href="#chim-lac" transform="rotate(337.5 250 250)" />
+  </g>
+
+  <!-- Middle Inner Separator Ring -->
+  <circle cx="250" cy="250" r="168" stroke="currentColor" stroke-width="1.8" />
+  <circle cx="250" cy="250" r="164" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" />
+  <circle cx="250" cy="250" r="160" stroke="currentColor" stroke-width="1.5" />
+
+  <!-- Middle Sawtooth Ring (Răng cưa giữa) -->
+  <circle cx="250" cy="250" r="154" stroke="currentColor" stroke-width="4.5" stroke-dasharray="3 4.5" fill="none" />
+  <circle cx="250" cy="250" r="148" stroke="currentColor" stroke-width="1.5" />
+
+  <!-- Vành hoa văn chữ S gãy khúc / hươu / người múa Đông Sơn -->
+  <circle cx="250" cy="250" r="146" stroke="currentColor" stroke-width="1.2" />
+  <circle cx="250" cy="250" r="132" stroke="currentColor" stroke-width="1.2" />
+  <circle cx="250" cy="250" r="139" stroke="currentColor" stroke-width="3" stroke-dasharray="2.5 5" fill="none" />
+  <circle cx="250" cy="250" r="139" stroke="currentColor" stroke-width="1" stroke-dasharray="0.1 7.5" stroke-linecap="round" />
+
+  <!-- Inner Concentric Tangent Circles & Beads -->
+  <circle cx="250" cy="250" r="130" stroke="currentColor" stroke-width="1.6" />
+  <circle cx="250" cy="250" r="124" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" />
+  <circle cx="250" cy="250" r="118" stroke="currentColor" stroke-width="1.5" />
+  <circle cx="250" cy="250" r="112" stroke="currentColor" stroke-width="3.5" stroke-dasharray="2.5 3.8" fill="none" />
+  <circle cx="250" cy="250" r="106" stroke="currentColor" stroke-width="1.6" />
+  <circle cx="250" cy="250" r="100" stroke="currentColor" stroke-width="1" stroke-dasharray="1.8 2.5" />
+  <circle cx="250" cy="250" r="95" stroke="currentColor" stroke-width="1.8" />
+
+  <!-- HOẠ TIẾT LÔNG CÔNG / HÌNH TAM GIÁC XEN KẼ CÁNH SAO (14 VỊ TRÍ) -->
+  <g id="star-interspaces">
+    <use href="#star-interspace" transform="rotate(12.857 250 250)" />
+    <use href="#star-interspace" transform="rotate(38.571 250 250)" />
+    <use href="#star-interspace" transform="rotate(64.285 250 250)" />
+    <use href="#star-interspace" transform="rotate(90 250 250)" />
+    <use href="#star-interspace" transform="rotate(115.714 250 250)" />
+    <use href="#star-interspace" transform="rotate(141.428 250 250)" />
+    <use href="#star-interspace" transform="rotate(167.142 250 250)" />
+    <use href="#star-interspace" transform="rotate(192.857 250 250)" />
+    <use href="#star-interspace" transform="rotate(218.571 250 250)" />
+    <use href="#star-interspace" transform="rotate(244.285 250 250)" />
+    <use href="#star-interspace" transform="rotate(270 250 250)" />
+    <use href="#star-interspace" transform="rotate(295.714 250 250)" />
+    <use href="#star-interspace" transform="rotate(321.428 250 250)" />
+    <use href="#star-interspace" transform="rotate(347.142 250 250)" />
+  </g>
+
+  <!-- NGÔI SAO TRUNG TÂM 14 CÁNH ĐÔNG SƠN (Đặc trưng Trống đồng Ngọc Lũ) -->
+  <g id="sun-star-14" fill="currentColor" stroke="currentColor" stroke-width="0.8">
+    <!-- 14 rays radiating outwards to r=92 -->
+    <!-- Ray 1 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(0 250 250)" />
+    <!-- Ray 2 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(25.714 250 250)" />
+    <!-- Ray 3 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(51.428 250 250)" />
+    <!-- Ray 4 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(77.142 250 250)" />
+    <!-- Ray 5 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(102.857 250 250)" />
+    <!-- Ray 6 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(128.571 250 250)" />
+    <!-- Ray 7 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(154.285 250 250)" />
+    <!-- Ray 8 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(180 250 250)" />
+    <!-- Ray 9 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(205.714 250 250)" />
+    <!-- Ray 10 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(231.428 250 250)" />
+    <!-- Ray 11 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(257.142 250 250)" />
+    <!-- Ray 12 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(282.857 250 250)" />
+    <!-- Ray 13 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(308.571 250 250)" />
+    <!-- Ray 14 -->
+    <polygon points="250,158 255.5,232 244.5,232" transform="rotate(334.285 250 250)" />
+  </g>
+
+  <!-- Central Solar Core (Tâm mặt trời trống đồng) -->
+  <circle cx="250" cy="250" r="22" stroke="currentColor" stroke-width="2.5" fill="none" />
+  <circle cx="250" cy="250" r="14" fill="currentColor" />
+  <circle cx="250" cy="250" r="6" stroke="#FFFFFF" stroke-width="1.5" fill="currentColor" />
+  <circle cx="250" cy="250" r="2" fill="#FFFFFF" />
+</svg>
