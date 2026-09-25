@@ -10,11 +10,12 @@ import {
   Bell, 
   Layers,
   Image as ImageIcon,
-  MessageSquareText
+  MessageSquareText,
+  ShieldCheck
 } from 'lucide-react';
 import { DongSonDrum, DongSonBorder } from './DongSonMotif';
 
-export type NavTab = 'dashboard' | 'courses' | 'exams' | 'radio' | 'feedbacks' | 'users' | 'units' | 'banners' | 'progress' | 'notifications' | 'settings' | 'firebase-diagnostics';
+export type NavTab = 'dashboard' | 'courses' | 'exams' | 'radio' | 'feedbacks' | 'users' | 'units' | 'banners' | 'progress' | 'notifications' | 'system-admin' | 'settings' | 'firebase-diagnostics';
 
 export interface SidebarProps {
   activeTab: NavTab | string;
@@ -22,6 +23,7 @@ export interface SidebarProps {
   onSelectTab?: (tab: string) => void;
   trashCount?: number;
   unresolvedFeedbacksCount?: number;
+  canManageAdmins?: boolean;
   stats?: {
     totalCourses: number;
     totalLessons: number;
@@ -37,6 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectTab,
   trashCount = 0,
   unresolvedFeedbacksCount,
+  canManageAdmins = false,
   stats,
   onLogout
 }) => {
@@ -79,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'radio' as NavTab,
       label: 'TRUYỀN THANH NỘI BỘ',
       icon: Radio,
-      badge: 'AUDIO',
+      badge: null,
     },
     {
       id: 'feedbacks' as NavTab,
@@ -103,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'banners' as NavTab,
       label: 'POSTER / BANNER',
       icon: ImageIcon,
-      badge: 'APP',
+      badge: null,
     },
     {
       id: 'notifications' as NavTab,
@@ -111,6 +114,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Bell,
       badge: null,
     },
+    ...(canManageAdmins ? [{
+      id: 'system-admin' as NavTab,
+      label: 'QUẢN TRỊ HỆ THỐNG',
+      icon: ShieldCheck,
+      badge: null,
+    }] : []),
   ];
 
   return (

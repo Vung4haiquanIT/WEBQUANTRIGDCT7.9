@@ -810,9 +810,74 @@
           "description": "Thời gian nộp bài"
         }
       }
+    },
+    "SystemAdmin": {
+      "title": "SystemAdmin",
+      "description": "Tài khoản quản trị viên hệ thống Web Admin GDCT",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "ID định danh quản trị viên",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 64
+        },
+        "username": {
+          "type": "string",
+          "description": "Tên đăng nhập hệ thống",
+          "maxLength": 64
+        },
+        "email": {
+          "type": "string",
+          "description": "Email quản trị viên",
+          "maxLength": 128
+        },
+        "fullName": {
+          "type": "string",
+          "description": "Họ và tên quản trị viên",
+          "maxLength": 128
+        },
+        "rank": {
+          "type": "string",
+          "description": "Cấp bậc quân sự",
+          "maxLength": 64
+        },
+        "position": {
+          "type": "string",
+          "description": "Chức vụ đảm nhiệm",
+          "maxLength": 128
+        },
+        "unitName": {
+          "type": "string",
+          "description": "Đơn vị công tác",
+          "maxLength": 128
+        },
+        "role": {
+          "type": "string",
+          "description": "Vai trò quản trị (SUPER_ADMIN | ADMIN)",
+          "enum": ["SUPER_ADMIN", "ADMIN"]
+        },
+        "isRoot": {
+          "type": "boolean",
+          "description": "Tài khoản quản trị tối cao"
+        },
+        "canManageAdmins": {
+          "type": "boolean",
+          "description": "Quyền quản lý các tài khoản quản trị khác"
+        },
+        "status": {
+          "type": "string",
+          "description": "Trạng thái hoạt động",
+          "enum": ["ACTIVE", "INACTIVE"]
+        }
+      }
     }
   },
   "firestore": {
+    "/system_admins/{adminId}": {
+      "schema": "SystemAdmin",
+      "description": "Quản trị danh sách tài khoản quản lý hệ thống Web Admin"
+    },
     "/ket_qua_thi/{resultId}": {
       "schema": "KetQuaThi",
       "description": "Lưu trữ kết quả thi trực tuyến từ ứng dụng"

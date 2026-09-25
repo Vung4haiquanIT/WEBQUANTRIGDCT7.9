@@ -6,15 +6,20 @@ import {
   Eye, 
   EyeOff, 
   AlertTriangle, 
-  Anchor,
+  CheckCircle,
+  Key,
   Compass,
-  ArrowRight
+  ArrowRight,
+  X,
+  ShieldCheck
 } from 'lucide-react';
 import { DongSonDrum, DongSonBorder } from '../components/DongSonMotif';
 import { Vung4Logo } from '../components/Vung4Logo';
+import { api } from '../services/api';
+import { AdminUserSession } from '../types';
 
 interface LoginViewProps {
-  onLoginSuccess: (adminUser: { email: string; name: string; role: string }) => void;
+  onLoginSuccess: (adminUser: AdminUserSession) => void;
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
@@ -23,52 +28,187 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Change password modal state
+  const [showChangeModal, setShowChangeModal] = useState(false);
+  const [changeAccount, setChangeAccount] = useState('');
+  const [changeOldPass, setChangeOldPass] = useState('');
+  const [changeNewPass, setChangeNewPass] = useState('');
+  const [changeConfirmPass, setChangeConfirmPass] = useState('');
+  const [showOldPass, setShowOldPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [changeError, setChangeError] = useState<string | null>(null);
+  const [isChangingPass, setIsChangingPass] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setSuccessMsg(null);
 
-    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedInput = email.trim().toLowerCase();
     const trimmedPass = password.trim();
 
-    if (!trimmedEmail || !trimmedPass) {
+    if (!trimmedInput || !trimmedPass) {
       setErrorMsg('Vui lòng nhập đầy đủ tên tài khoản và mật khẩu.');
       return;
     }
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      // Validate credentials: admin@v4.hq / 123@abc
-      if (
-        (trimmedEmail === 'admin@v4.hq' || trimmedEmail === 'admin') &&
-        trimmedPass === '123@abc'
-      ) {
-        const adminData = {
-          email: 'admin@v4.hq',
-          name: 'Ban Tuyên Huấn - Vùng 4 Hải Quân',
-          role: 'ADMINISTRATOR'
+    try {
+      // 1. Fetch system admins from cloud/local storage
+      const admins = await api.getSystemAdmins().catch((err) => {
+        console.warn('Cannot fetch system admins, will test fallback credentials:', err);
+        return [];
+      });
+
+      // 2. Check matching admin account
+      const matchedAdmin = admins.find(a => 
+        (a.username && a.username.toLowerCase() === trimmedInput) ||
+        (a.email && a.email.toLowerCase() === trimmedInput) ||
+        (trimmedInput === 'admin' && (a.username === 'admin' || a.isRoot)) ||
+        (trimmedInput === 'admin@v4.hq' && (a.email === 'admin@v4.hq' || a.isRoot))
+      );
+
+      // Check root saved password
+      let rootSavedPass = '123@abc';
+      try {
+        const lp = localStorage.getItem('hq_root_admin_pwd');
+        if (lp) rootSavedPass = lp;
+      } catch {}
+
+      if (matchedAdmin) {
+        // Check if locked
+        if (matchedAdmin.isLocked || matchedAdmin.status === 'INACTIVE') {
+          setErrorMsg('Tài khoản quản trị viên này hiện đang bị khóa! Vui lòng liên hệ Quản trị tối cao.');
+          setIsSubmitting(false);
+          return;
+        }
+
+        const validPassword = matchedAdmin.password || (matchedAdmin.isRoot ? rootSavedPass : '123@abc');
+        if (trimmedPass !== validPassword) {
+          setErrorMsg('Mật khẩu không chính xác! Vui lòng kiểm tra lại.');
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Login success!
+        const sessionData: AdminUserSession = {
+          id: matchedAdmin.id,
+          email: matchedAdmin.email || `${matchedAdmin.username}@v4.hq`,
+          username: matchedAdmin.username,
+          name: matchedAdmin.fullName || matchedAdmin.username,
+          role: matchedAdmin.role || (matchedAdmin.isRoot ? 'SUPER_ADMIN' : 'ADMIN'),
+          isRoot: matchedAdmin.isRoot === true || matchedAdmin.id === 'admin-root',
+          canManageAdmins: matchedAdmin.isRoot === true || matchedAdmin.id === 'admin-root',
+          rankAndPosition: matchedAdmin.rankAndPosition,
+          unitName: matchedAdmin.unitName,
+          loginTime: new Date().toISOString()
         };
 
         if (rememberMe) {
-          localStorage.setItem('hq_admin_session', JSON.stringify({
-            ...adminData,
-            loginTime: new Date().toISOString()
-          }));
+          localStorage.setItem('hq_admin_session', JSON.stringify(sessionData));
         } else {
-          sessionStorage.setItem('hq_admin_session', JSON.stringify({
-            ...adminData,
-            loginTime: new Date().toISOString()
-          }));
+          sessionStorage.setItem('hq_admin_session', JSON.stringify(sessionData));
         }
 
-        onLoginSuccess(adminData);
-      } else {
-        setErrorMsg('Tài khoản hoặc mật khẩu không chính xác! Vui lòng kiểm tra lại.');
-        setIsSubmitting(false);
+        onLoginSuccess(sessionData);
+        return;
       }
-    }, 450);
+
+      // Fallback for default root admin if list was empty or offline
+      if (
+        (trimmedInput === 'admin@v4.hq' || trimmedInput === 'admin') &&
+        (trimmedPass === rootSavedPass || trimmedPass === '123@abc')
+      ) {
+        const rootData: AdminUserSession = {
+          id: 'admin-root',
+          email: 'admin@v4.hq',
+          username: 'admin',
+          name: 'Ban Tuyên Huấn - Vùng 4 Hải Quân',
+          role: 'SUPER_ADMIN',
+          isRoot: true,
+          canManageAdmins: true,
+          rankAndPosition: 'Đại tá - Chủ nhiệm Chính trị Vùng 4',
+          unitName: 'Bộ Tư lệnh Vùng 4 Hải Quân',
+          loginTime: new Date().toISOString()
+        };
+
+        if (rememberMe) {
+          localStorage.setItem('hq_admin_session', JSON.stringify(rootData));
+        } else {
+          sessionStorage.setItem('hq_admin_session', JSON.stringify(rootData));
+        }
+
+        onLoginSuccess(rootData);
+        return;
+      }
+
+      setErrorMsg('Tài khoản hoặc mật khẩu không chính xác! Vui lòng kiểm tra lại.');
+    } catch (err: any) {
+      console.error('Login error:', err);
+      setErrorMsg('Lỗi xác thực hệ thống. Vui lòng thử lại sau.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleOpenChangePassword = () => {
+    setChangeAccount(email.trim());
+    setChangeOldPass('');
+    setChangeNewPass('');
+    setChangeConfirmPass('');
+    setChangeError(null);
+    setShowOldPass(false);
+    setShowNewPass(false);
+    setShowChangeModal(true);
+  };
+
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setChangeError(null);
+
+    const trimmedAccount = changeAccount.trim().toLowerCase();
+    const trimmedOld = changeOldPass.trim();
+    const trimmedNew = changeNewPass.trim();
+    const trimmedConfirm = changeConfirmPass.trim();
+
+    if (!trimmedAccount || !trimmedOld || !trimmedNew) {
+      setChangeError('Vui lòng điền đầy đủ các thông tin!');
+      return;
+    }
+
+    if (trimmedNew.length < 6) {
+      setChangeError('Mật khẩu mới phải có tối thiểu 6 ký tự!');
+      return;
+    }
+
+    if (trimmedNew !== trimmedConfirm) {
+      setChangeError('Xác nhận mật khẩu mới không khớp!');
+      return;
+    }
+
+    if (trimmedOld === trimmedNew) {
+      setChangeError('Mật khẩu mới không được trùng với mật khẩu hiện tại!');
+      return;
+    }
+
+    try {
+      setIsChangingPass(true);
+      const res = await api.changeAdminPassword(trimmedAccount, trimmedOld, trimmedNew);
+      setShowChangeModal(false);
+      setSuccessMsg(res.message || 'Đổi mật khẩu thành công! Đồng chí có thể đăng nhập bằng mật khẩu mới.');
+      // Pre-fill inputs with new credentials for convenience
+      setEmail(trimmedAccount);
+      setPassword(trimmedNew);
+      setErrorMsg(null);
+    } catch (err: any) {
+      setChangeError(err.message || 'Lỗi khi đổi mật khẩu.');
+    } finally {
+      setIsChangingPass(false);
+    }
   };
 
   return (
@@ -122,6 +262,16 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               Xác thực quyền quản lý cán bộ tuyên huấn & chính trị
             </p>
           </div>
+
+          {/* Success Message Box */}
+          {successMsg && (
+            <div 
+              className="mb-5 p-3.5 rounded-2xl bg-emerald-950/80 border border-emerald-500/60 text-emerald-200 text-xs flex items-start space-x-2.5 animate-in fade-in slide-in-from-top-2"
+            >
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="flex-1 font-medium leading-relaxed">{successMsg}</div>
+            </div>
+          )}
 
           {/* Error Message Box */}
           {errorMsg && (
@@ -193,7 +343,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               </div>
             </div>
 
-            {/* Remember Me */}
+            {/* Remember Me & Change Password Link */}
             <div className="flex items-center justify-between pt-1 text-xs">
               <label className="flex items-center space-x-2 cursor-pointer text-slate-300 hover:text-white transition-colors">
                 <input
@@ -203,8 +353,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   onChange={(e) => setRememberMe(e.target.checked)}
                   className="w-4 h-4 rounded bg-slate-900 border-slate-700 text-amber-500 focus:ring-0 focus:ring-offset-0 cursor-pointer accent-amber-500"
                 />
-                <span className="font-medium">Ghi nhớ đăng nhập</span>
+                <span className="font-medium">Ghi nhớ</span>
               </label>
+
+              {/* Chức năng Đổi mật khẩu ngoài màn hình đăng nhập */}
+              <button
+                type="button"
+                id="btn-open-change-password-modal"
+                onClick={handleOpenChangePassword}
+                className="text-amber-400 hover:text-amber-300 font-bold flex items-center space-x-1.5 transition-colors group"
+              >
+                <Key className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-45 transition-transform" />
+                <span className="hover:underline">Đổi mật khẩu?</span>
+              </button>
             </div>
 
             {/* Submit Button */}
@@ -229,6 +390,139 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           </form>
         </div>
       </main>
+
+      {/* Modal: Đổi mật khẩu tài khoản quản trị */}
+      {showChangeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in">
+          <div className="bg-[#0B1E3B] border border-amber-500/40 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl shadow-black/80 flex flex-col">
+            <div className="p-5 border-b border-slate-700/80 flex items-center justify-between bg-slate-900/60">
+              <div className="flex items-center space-x-2.5">
+                <span className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  <Key className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-white uppercase tracking-tight">
+                    ĐỔI MẬT KHẨU QUẢN TRỊ
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Cập nhật mật khẩu bảo mật cho tài khoản quản trị viên
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowChangeModal(false)}
+                className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleChangePasswordSubmit} className="p-6 space-y-4">
+              {changeError && (
+                <div className="p-3 rounded-xl bg-rose-950/80 border border-rose-500/60 text-rose-200 text-xs flex items-start space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed font-medium">{changeError}</span>
+                </div>
+              )}
+
+              {/* Account / Username input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Tài khoản / Email quản trị <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={changeAccount}
+                  onChange={(e) => setChangeAccount(e.target.value)}
+                  placeholder="Nhập tên tài khoản hoặc email..."
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 text-white text-xs rounded-xl px-3.5 py-2.5 outline-none"
+                />
+              </div>
+
+              {/* Current Password */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Mật khẩu hiện tại <span className="text-rose-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showOldPass ? 'text' : 'password'}
+                    required
+                    value={changeOldPass}
+                    onChange={(e) => setChangeOldPass(e.target.value)}
+                    placeholder="Nhập mật khẩu đang dùng..."
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 text-white text-xs rounded-xl pl-3.5 pr-10 py-2.5 outline-none font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowOldPass(!showOldPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
+                  >
+                    {showOldPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Mật khẩu mới (tối thiểu 6 ký tự) <span className="text-rose-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type={showNewPass ? 'text' : 'password'}
+                    required
+                    value={changeNewPass}
+                    onChange={(e) => setChangeNewPass(e.target.value)}
+                    placeholder="Nhập mật khẩu mới..."
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 text-white text-xs rounded-xl pl-3.5 pr-10 py-2.5 outline-none font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPass(!showNewPass)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
+                  >
+                    {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm New Password */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Xác nhận mật khẩu mới <span className="text-rose-400">*</span>
+                </label>
+                <input
+                  type={showNewPass ? 'text' : 'password'}
+                  required
+                  value={changeConfirmPass}
+                  onChange={(e) => setChangeConfirmPass(e.target.value)}
+                  placeholder="Nhập lại mật khẩu mới..."
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 text-white text-xs rounded-xl px-3.5 py-2.5 outline-none font-mono"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowChangeModal(false)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all"
+                >
+                  HỦY
+                </button>
+                <button
+                  type="submit"
+                  disabled={isChangingPass}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50"
+                >
+                  {isChangingPass ? 'ĐANG CẬP NHẬT...' : 'LƯU MẬT KHẨU MỚI'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Footer / Confidentiality Warning */}
       <footer className="relative z-10 py-4 px-6 text-center text-[11px] text-slate-400 border-t border-slate-800 bg-[#061224]/80">

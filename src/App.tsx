@@ -8,7 +8,9 @@ import {
   SystemNotification, 
   RealtimeEvent,
   AppBanner,
-  UserFeedback
+  UserFeedback,
+  SystemAdmin,
+  AdminUserSession
 } from './types';
 import { api } from './services/api';
 import { Sidebar } from './components/Sidebar';
@@ -25,16 +27,22 @@ import { BannersView } from './views/BannersView';
 import { ProgressView } from './views/ProgressView';
 import { NotificationsView } from './views/NotificationsView';
 import { RadioBroadcastView } from './views/RadioBroadcastView';
+import { SystemAdminView } from './views/SystemAdminView';
 import { LoginView } from './views/LoginView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Radio, Bell, CheckCircle } from 'lucide-react';
 
 export function App() {
-  const [adminUser, setAdminUser] = useState<{ email: string; name: string; role: string } | null>(() => {
+  const [adminUser, setAdminUser] = useState<AdminUserSession | null>(() => {
     try {
       const saved = localStorage.getItem('hq_admin_session') || sessionStorage.getItem('hq_admin_session');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed.email === 'admin@v4.hq' || parsed.username === 'admin' || parsed.role === 'SUPER_ADMIN') {
+          parsed.isRoot = true;
+          parsed.canManageAdmins = true;
+        }
+        return parsed;
       }
     } catch (e) {
       console.warn('Failed to parse admin session:', e);
@@ -57,6 +65,7 @@ export function App() {
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [banners, setBanners] = useState<AppBanner[]>([]);
   const [feedbacks, setFeedbacks] = useState<UserFeedback[]>([]);
+  const [systemAdmins, setSystemAdmins] = useState<SystemAdmin[]>([]);
 
   // Navigation & Modal states
   const [selectedLessonForEditing, setSelectedLessonForEditing] = useState<Lesson | null>(null);
@@ -93,6 +102,7 @@ export function App() {
         notifsRes,
         bannersRes,
         feedbacksRes,
+        systemAdminsRes,
       ] = await Promise.all([
         api.getCourses(false),
         api.getCourses(true),
@@ -104,6 +114,7 @@ export function App() {
         api.getNotifications(),
         api.getBanners().catch(() => []),
         api.getFeedbacks().catch(() => []),
+        api.getSystemAdmins().catch(() => []),
       ]);
 
       setCourses(coursesRes);
@@ -116,6 +127,7 @@ export function App() {
       setNotifications(notifsRes);
       setBanners(bannersRes);
       setFeedbacks(feedbacksRes || []);
+      setSystemAdmins(systemAdminsRes || []);
 
       // Tự động kiểm tra và đồng bộ năm (year) cho các bài học nếu chưa có để App thống kê chính xác
       const needsYearSync = lessonsRes.some(l => !l.year || !l.courseYear);
@@ -127,6 +139,14 @@ export function App() {
           }
         }).catch((err) => console.warn('[App] Lỗi đồng bộ năm bài học:', err));
       }
+
+      // Tự động đồng bộ tiêu đề bài học mới nhất vào các bản ghi tiến độ học tập nếu bài học bị đổi tên
+      api.syncProgressLessonTitles().then((res) => {
+        if (res.updatedCount > 0) {
+          console.log(`[App] Đã tự động đồng bộ tiêu đề bài học cho ${res.updatedCount} bản ghi tiến độ.`);
+          api.getProgress().then(updatedProg => setProgressList(updatedProg)).catch(() => {});
+        }
+      }).catch((err) => console.warn('[App] Lỗi đồng bộ tiêu đề bài học trong tiến độ:', err));
     } catch (err) {
       console.error('Error fetching initial data:', err);
     } finally {
@@ -158,10 +178,16 @@ export function App() {
         setProgressList(progs || []);
       });
 
+      // Realtime listener for system admin accounts
+      const unsubAdmins = api.listenSystemAdmins((adms) => {
+        setSystemAdmins(adms || []);
+      });
+
       return () => {
         unsubscribe();
         unsubFeedbacks();
         unsubProgress();
+        unsubAdmins();
       };
     }
   }, [adminUser]);
@@ -310,6 +336,27 @@ export function App() {
     await fetchAllData();
   };
 
+  // -------------------------------------------------------------
+  // System Admin CRUD Handlers (QUẢN TRỊ HỆ THỐNG)
+  // -------------------------------------------------------------
+  const handleCreateSystemAdmin = async (data: Partial<SystemAdmin>) => {
+    await api.createSystemAdmin(data);
+    const updated = await api.getSystemAdmins();
+    setSystemAdmins(updated);
+  };
+
+  const handleUpdateSystemAdmin = async (id: string, data: Partial<SystemAdmin>) => {
+    await api.updateSystemAdmin(id, data);
+    const updated = await api.getSystemAdmins();
+    setSystemAdmins(updated);
+  };
+
+  const handleDeleteSystemAdmin = async (id: string) => {
+    await api.deleteSystemAdmin(id);
+    const updated = await api.getSystemAdmins();
+    setSystemAdmins(updated);
+  };
+
   // If not logged in as Admin, show the Military Admin Login Portal first
   if (!adminUser) {
     return (
@@ -358,9 +405,14 @@ export function App() {
         <Sidebar
           activeTab={selectedLessonForEditing ? 'courses' : currentView}
           onSelectTab={(tab) => {
+            if (tab === 'system-admin' && !adminUser.canManageAdmins && !adminUser.isRoot) {
+              setCurrentView('dashboard');
+              return;
+            }
             setSelectedLessonForEditing(null);
             setCurrentView(tab);
           }}
+          canManageAdmins={adminUser.canManageAdmins === true || adminUser.isRoot === true}
           trashCount={deletedCourses.length + deletedLessons.length}
           unresolvedFeedbacksCount={unresolvedFeedbacksCount}
           stats={{
@@ -462,6 +514,31 @@ export function App() {
                 onCreateNotification={handleCreateNotification}
                 onDeleteNotification={handleDeleteNotification}
               />
+            ) : currentView === 'system-admin' ? (
+              (adminUser.canManageAdmins || adminUser.isRoot) ? (
+                <SystemAdminView
+                  admins={systemAdmins}
+                  units={units}
+                  currentAdmin={adminUser}
+                  onCreateAdmin={handleCreateSystemAdmin}
+                  onUpdateAdmin={handleUpdateSystemAdmin}
+                  onDeleteAdmin={handleDeleteSystemAdmin}
+                  onRefresh={fetchAllData}
+                />
+              ) : (
+                <DashboardView
+                  courses={courses}
+                  lessons={lessons}
+                  units={units}
+                  users={users}
+                  progressList={progressList}
+                  notifications={notifications}
+                  onNavigate={(tab) => setCurrentView(tab)}
+                  onSelectLesson={(l) => {
+                    setSelectedLessonForEditing(l);
+                  }}
+                />
+              )
             ) : (
               <DashboardView
                 courses={courses}

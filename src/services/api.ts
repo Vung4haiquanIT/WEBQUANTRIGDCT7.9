@@ -41,7 +41,8 @@ import {
   UserFeedback,
   FeedbackType,
   FeedbackStatus,
-  RadioBroadcast
+  RadioBroadcast,
+  SystemAdmin
 } from '../types';
 
 /**
@@ -157,6 +158,10 @@ export const api = {
 
   syncAllLessonsYear: async (): Promise<{ updatedCount: number; totalLessons: number }> => {
     return await firestoreService.syncAllLessonsYear();
+  },
+
+  syncProgressLessonTitles: async (): Promise<{ updatedCount: number }> => {
+    return await firestoreService.syncProgressLessonTitles();
   },
 
   updateModuleConfig: async (lessonId: string, moduleConfig: LessonModuleConfig): Promise<Lesson> => {
@@ -1478,5 +1483,36 @@ export const api = {
       format: res.format || 'mp3',
       mimeType: file.type || res.mimeType || 'audio/mp3'
     };
+  },
+
+  // -------------------------------------------------------------
+  // QUẢN TRỊ HỆ THỐNG (SYSTEM ADMINS)
+  // -------------------------------------------------------------
+  getSystemAdmins: async (): Promise<SystemAdmin[]> => {
+    return await firestoreService.getSystemAdmins();
+  },
+
+  createSystemAdmin: async (admin: Partial<SystemAdmin>): Promise<SystemAdmin> => {
+    return await firestoreService.createSystemAdmin(admin);
+  },
+
+  updateSystemAdmin: async (id: string, data: Partial<SystemAdmin>): Promise<SystemAdmin> => {
+    return await firestoreService.updateSystemAdmin(id, data);
+  },
+
+  deleteSystemAdmin: async (id: string): Promise<{ success: boolean; message?: string }> => {
+    return await firestoreService.deleteSystemAdmin(id);
+  },
+
+  changeAdminPassword: async (
+    identifier: string,
+    oldPass: string,
+    newPass: string
+  ): Promise<{ success: boolean; message: string; admin?: SystemAdmin }> => {
+    return await firestoreService.changeAdminPassword(identifier, oldPass, newPass);
+  },
+
+  listenSystemAdmins: (callback: (admins: SystemAdmin[]) => void) => {
+    return firestoreService.listenSystemAdmins(callback);
   }
 };

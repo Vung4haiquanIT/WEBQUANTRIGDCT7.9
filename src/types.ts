@@ -33,6 +33,44 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export interface SystemAdmin {
+  id: string;
+  username: string; // Tên tài khoản đăng nhập (ví dụ: admin, tuyenhuan162, toan.tv)
+  email: string;    // Email quản trị viên
+  fullName: string; // Họ tên đầy đủ
+  rank?: string;    // Cấp bậc (Đại tá, Trung tá,...)
+  position?: string;// Chức danh (Chủ nhiệm Chính trị, Trợ lý Tuyên huấn,...)
+  rankAndPosition?: string;
+  unitId?: string;
+  unitName?: string;// Đơn vị (Bộ Tư lệnh Vùng 4, Lữ đoàn 162,...)
+  password?: string;// Mật khẩu đăng nhập
+  role: 'SUPER_ADMIN' | 'ADMIN'; // SUPER_ADMIN (Root): Quản trị tối cao; ADMIN: Quản trị viên nội dung
+  isRoot?: boolean; // True: Tài khoản tối cao mặc định (không được xóa, không được khóa)
+  canManageAdmins?: boolean; // True nếu có quyền thấy menu "QUẢN TRỊ HỆ THỐNG" và thêm admin khác
+  status: 'ACTIVE' | 'INACTIVE';
+  isLocked?: boolean;
+  notes?: string;
+  createdBy?: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+  lastPasswordChangedAt?: string;
+}
+
+export interface AdminUserSession {
+  id?: string;
+  email: string;
+  username?: string;
+  name: string;
+  fullName?: string;
+  role: string;
+  isRoot?: boolean;
+  canManageAdmins?: boolean;
+  rankAndPosition?: string;
+  unitName?: string;
+  loginTime?: string;
+}
+
 export type PublishStatus = 'DRAFT' | 'REVIEW' | 'PUBLISHED' | 'ARCHIVED' | 'INTERNAL';
 
 export interface User {

@@ -37,7 +37,7 @@ service cloud.firestore {
     function isSuperAdmin() {
       return request.auth == null || (request.auth != null && (
         getUserRole() == 'SUPER_ADMIN' ||
-        (request.auth.token.email != null && request.auth.token.email == 'aigerminipro@gmail.com')
+        (request.auth.token.email != null && request.auth.token.email in ['dungsltp@gmail.com', 'aigerminipro@gmail.com'])
       ));
     }
 
@@ -314,6 +314,13 @@ service cloud.firestore {
       allow get, list: if true;
       allow create, update: if isValidId(broadcastId);
       allow delete: if isValidId(broadcastId);
+    }
+
+    // System Administrators Collection (Quản trị hệ thống)
+    match /system_admins/{adminId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(adminId);
+      allow delete: if isValidId(adminId);
     }
   }
 }

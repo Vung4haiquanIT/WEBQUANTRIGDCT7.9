@@ -80,7 +80,7 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload: any = multer({ 
   storage, 
   limits: { fileSize: 250 * 1024 * 1024 } // 250MB max file size
 });
@@ -2691,6 +2691,73 @@ app.delete('/api/users/:id', (req: Request, res: Response) => {
   db.users.splice(idx, 1);
   saveDatabase(db);
   res.json({ success: true });
+});
+
+// -------------------------------------------------------------
+// SYSTEM ADMINS (QUẢN TRỊ HỆ THỐNG)
+// -------------------------------------------------------------
+app.get('/api/system-admins', async (_req: Request, res: Response) => {
+  try {
+    const list = await firestoreService.getSystemAdmins();
+    res.json(list);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/system-admins', async (req: Request, res: Response) => {
+  try {
+    const created = await firestoreService.createSystemAdmin(req.body);
+    broadcastRealtime({
+      type: 'SYNC_EVENT',
+      entityId: created.id,
+      action: 'CREATE',
+      timestamp: new Date().toISOString()
+    });
+    res.status(201).json(created);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/system-admins/:id', async (req: Request, res: Response) => {
+  try {
+    const updated = await firestoreService.updateSystemAdmin(req.params.id, req.body);
+    broadcastRealtime({
+      type: 'SYNC_EVENT',
+      entityId: req.params.id,
+      action: 'UPDATE',
+      timestamp: new Date().toISOString()
+    });
+    res.json(updated);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/system-admins/:id', async (req: Request, res: Response) => {
+  try {
+    const result = await firestoreService.deleteSystemAdmin(req.params.id);
+    broadcastRealtime({
+      type: 'SYNC_EVENT',
+      entityId: req.params.id,
+      action: 'DELETE',
+      timestamp: new Date().toISOString()
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/system-admins/change-password', async (req: Request, res: Response) => {
+  try {
+    const { identifier, oldPassword, newPassword } = req.body;
+    const result = await firestoreService.changeAdminPassword(identifier, oldPassword, newPassword);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // -------------------------------------------------------------

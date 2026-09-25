@@ -50,7 +50,8 @@ import {
   UserFeedback,
   FeedbackType,
   FeedbackStatus,
-  RadioBroadcast
+  RadioBroadcast,
+  SystemAdmin
 } from '../types';
 import { 
   isFixedCourse, 
@@ -830,6 +831,26 @@ export const firestoreService = {
     };
     
     await updateDoc(docRef, updatePayload);
+
+    // Đồng bộ tên bài học mới vào toàn bộ tiến độ người học nếu tiêu đề bị thay đổi
+    if (data.title && data.title !== prev.title) {
+      try {
+        const progSnap = await getDocs(query(collection(db, 'progress'), where('lessonId', '==', id)));
+        if (!progSnap.empty) {
+          const progBatch = writeBatch(db);
+          progSnap.docs.forEach((pDoc) => {
+            progBatch.update(pDoc.ref, {
+              lessonTitle: data.title,
+              updatedAt: now
+            });
+          });
+          await progBatch.commit();
+        }
+      } catch (syncErr) {
+        console.warn('Lỗi tự động đồng bộ tên bài học vào bản ghi tiến độ:', syncErr);
+      }
+    }
+
     const updatedSnap = await getDoc(docRef);
     return updatedSnap.data() as Lesson;
   },
@@ -894,6 +915,50 @@ export const firestoreService = {
     } catch (err) {
       console.error('Lỗi khi đồng bộ năm bài học:', err);
       return { updatedCount: 0, totalLessons: 0 };
+    }
+  },
+
+  // Đồng bộ tiêu đề bài học mới nhất sang toàn bộ bản ghi UserProgress
+  syncProgressLessonTitles: async (): Promise<{ updatedCount: number }> => {
+    try {
+      const [lessonsSnap, progressSnap] = await Promise.all([
+        getDocs(collection(db, 'lessons')),
+        getDocs(collection(db, 'progress'))
+      ]);
+      const lessonTitleMap = new Map<string, string>();
+      lessonsSnap.docs.forEach((d) => {
+        const l = d.data() as Lesson;
+        if (l.id && l.title) {
+          lessonTitleMap.set(l.id, l.title.trim());
+        }
+      });
+
+      let updatedCount = 0;
+      const batch = writeBatch(db);
+      let batchOps = 0;
+
+      progressSnap.docs.forEach((d) => {
+        const p = d.data() as UserProgress;
+        if (p.lessonId && lessonTitleMap.has(p.lessonId)) {
+          const currentTitle = lessonTitleMap.get(p.lessonId)!;
+          if (p.lessonTitle !== currentTitle) {
+            batch.update(d.ref, {
+              lessonTitle: currentTitle,
+              updatedAt: new Date().toISOString()
+            });
+            batchOps++;
+            updatedCount++;
+          }
+        }
+      });
+
+      if (batchOps > 0) {
+        await batch.commit();
+      }
+      return { updatedCount };
+    } catch (e) {
+      console.warn('Lỗi đồng bộ tiêu đề bài học trong tiến độ:', e);
+      return { updatedCount: 0 };
     }
   },
 
@@ -4727,6 +4792,300 @@ export const firestoreService = {
     }, (err) => {
       console.warn('[listenRadioBroadcasts warning]:', err);
       callback([]);
+    });
+  },
+
+  // -------------------------------------------------------------
+  // SYSTEM ADMINS MANAGEMENT (QUẢN TRỊ HỆ THỐNG)
+  // -------------------------------------------------------------
+  getSystemAdmins: async (): Promise<SystemAdmin[]> => {
+    try {
+      const colRef = collection(db, 'system_admins');
+      const snap = await getDocs(colRef);
+      let admins: SystemAdmin[] = snap.docs.map(d => ({ ...(d.data() as any), id: d.id }) as SystemAdmin);
+
+      // Check if root admin exists
+      const hasRoot = admins.some(a => a.isRoot === true || a.username === 'admin' || a.email === 'admin@v4.hq');
+      if (!hasRoot) {
+        let rootPass = '123@abc';
+        try {
+          const savedPass = localStorage.getItem('hq_root_admin_pwd');
+          if (savedPass) rootPass = savedPass;
+        } catch {}
+
+        const rootAdmin: SystemAdmin = {
+          id: 'admin-root',
+          username: 'admin',
+          email: 'admin@v4.hq',
+          fullName: 'Ban Tuyên Huấn - Bộ Tư lệnh Vùng 4 Hải Quân',
+          rank: 'Đại tá',
+          position: 'Chủ nhiệm Chính trị Vùng 4',
+          rankAndPosition: 'Đại tá - Chủ nhiệm Chính trị Vùng 4',
+          unitName: 'Bộ Tư lệnh Vùng 4 Hải Quân',
+          password: rootPass,
+          role: 'SUPER_ADMIN',
+          isRoot: true,
+          canManageAdmins: true,
+          status: 'ACTIVE',
+          isLocked: false,
+          notes: 'Tài khoản Quản trị tối cao mặc định của Hệ thống GDCT Vùng 4 Hải Quân',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: new Date().toISOString()
+        };
+
+        try {
+          await setDoc(doc(db, 'system_admins', rootAdmin.id), rootAdmin);
+        } catch (saveErr) {
+          console.warn('[getSystemAdmins] Seed root admin warning:', saveErr);
+        }
+        admins.unshift(rootAdmin);
+      }
+
+      admins.sort((a, b) => {
+        if (a.isRoot) return -1;
+        if (b.isRoot) return 1;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
+
+      return admins;
+    } catch (err) {
+      console.warn('[getSystemAdmins fallback]:', err);
+      let localAdmins: SystemAdmin[] = [];
+      try {
+        const stored = localStorage.getItem('hq_local_system_admins');
+        if (stored) localAdmins = JSON.parse(stored);
+      } catch {}
+
+      if (!localAdmins.some(a => a.isRoot || a.username === 'admin')) {
+        let rootPass = '123@abc';
+        try {
+          const saved = localStorage.getItem('hq_root_admin_pwd');
+          if (saved) rootPass = saved;
+        } catch {}
+
+        localAdmins.unshift({
+          id: 'admin-root',
+          username: 'admin',
+          email: 'admin@v4.hq',
+          fullName: 'Ban Tuyên Huấn - Bộ Tư lệnh Vùng 4 Hải Quân',
+          rank: 'Đại tá',
+          position: 'Chủ nhiệm Chính trị Vùng 4',
+          rankAndPosition: 'Đại tá - Chủ nhiệm Chính trị Vùng 4',
+          unitName: 'Bộ Tư lệnh Vùng 4 Hải Quân',
+          password: rootPass,
+          role: 'SUPER_ADMIN',
+          isRoot: true,
+          canManageAdmins: true,
+          status: 'ACTIVE',
+          isLocked: false,
+          notes: 'Tài khoản Quản trị tối cao mặc định của Hệ thống GDCT Vùng 4',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: new Date().toISOString()
+        });
+      }
+      return localAdmins;
+    }
+  },
+
+  createSystemAdmin: async (adminData: Partial<SystemAdmin>): Promise<SystemAdmin> => {
+    const id = adminData.id || `admin-${Date.now()}`;
+    const now = new Date().toISOString();
+    const rankAndPos = adminData.rankAndPosition || (adminData.rank && adminData.position ? `${adminData.rank} - ${adminData.position}` : adminData.rank || adminData.position || 'Cán bộ Tuyên huấn');
+
+    const newAdmin: SystemAdmin = {
+      id,
+      username: (adminData.username || `admin_${Date.now().toString().slice(-4)}`).trim().toLowerCase(),
+      email: (adminData.email || '').trim().toLowerCase(),
+      fullName: (adminData.fullName || 'Cán bộ quản trị').trim(),
+      rank: adminData.rank || 'Trung tá',
+      position: adminData.position || 'Trợ lý Tuyên huấn',
+      rankAndPosition: rankAndPos,
+      unitId: adminData.unitId || 'unit-1',
+      unitName: adminData.unitName || 'Bộ Tư lệnh Vùng 4 Hải Quân',
+      password: adminData.password || '123@abc',
+      role: 'ADMIN',
+      isRoot: false,
+      canManageAdmins: false, // Tài khoản quản trị viên được tạo KHÔNG thấy quản trị hệ thống
+      status: adminData.status || 'ACTIVE',
+      isLocked: adminData.isLocked || false,
+      notes: adminData.notes || '',
+      createdBy: adminData.createdBy || 'Quản trị viên tối cao',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    try {
+      await setDoc(doc(db, 'system_admins', id), newAdmin);
+    } catch (err) {
+      console.warn('[createSystemAdmin warning]:', err);
+    }
+
+    try {
+      const stored = localStorage.getItem('hq_local_system_admins');
+      const list: SystemAdmin[] = stored ? JSON.parse(stored) : [];
+      list.push(newAdmin);
+      localStorage.setItem('hq_local_system_admins', JSON.stringify(list));
+    } catch {}
+
+    return newAdmin;
+  },
+
+  updateSystemAdmin: async (id: string, data: Partial<SystemAdmin>): Promise<SystemAdmin> => {
+    const now = new Date().toISOString();
+    const cleanData: any = { ...data, updatedAt: now };
+
+    if (id === 'admin-root' || data.isRoot) {
+      cleanData.isRoot = true;
+      cleanData.canManageAdmins = true;
+      cleanData.role = 'SUPER_ADMIN';
+    } else {
+      cleanData.isRoot = false;
+      cleanData.canManageAdmins = false;
+    }
+
+    try {
+      await updateDoc(doc(db, 'system_admins', id), cleanData);
+    } catch (err) {
+      console.warn('[updateSystemAdmin warning]:', err);
+    }
+
+    try {
+      const stored = localStorage.getItem('hq_local_system_admins');
+      if (stored) {
+        const list: SystemAdmin[] = JSON.parse(stored);
+        const idx = list.findIndex(a => a.id === id);
+        if (idx !== -1) {
+          list[idx] = { ...list[idx], ...cleanData };
+          localStorage.setItem('hq_local_system_admins', JSON.stringify(list));
+        }
+      }
+    } catch {}
+
+    return { id, ...cleanData } as SystemAdmin;
+  },
+
+  deleteSystemAdmin: async (id: string): Promise<{ success: boolean; message?: string }> => {
+    if (id === 'admin-root') {
+      throw new Error('Không thể xóa tài khoản Quản trị tối cao (Root Administrator).');
+    }
+
+    try {
+      await deleteDoc(doc(db, 'system_admins', id));
+    } catch (err) {
+      console.warn('[deleteSystemAdmin warning]:', err);
+    }
+
+    try {
+      const stored = localStorage.getItem('hq_local_system_admins');
+      if (stored) {
+        let list: SystemAdmin[] = JSON.parse(stored);
+        list = list.filter(a => a.id !== id);
+        localStorage.setItem('hq_local_system_admins', JSON.stringify(list));
+      }
+    } catch {}
+
+    return { success: true, message: 'Đã xóa tài khoản quản trị thành công.' };
+  },
+
+  changeAdminPassword: async (
+    identifier: string,
+    oldPassword: string,
+    newPassword: string
+  ): Promise<{ success: boolean; message: string; admin?: SystemAdmin }> => {
+    const trimmedId = identifier.trim().toLowerCase();
+    const trimmedOld = oldPassword.trim();
+    const trimmedNew = newPassword.trim();
+
+    if (!trimmedId || !trimmedOld || !trimmedNew) {
+      throw new Error('Vui lòng nhập đầy đủ thông tin tài khoản, mật khẩu cũ và mật khẩu mới.');
+    }
+    if (trimmedNew.length < 6) {
+      throw new Error('Mật khẩu mới phải có tối thiểu 6 ký tự.');
+    }
+    if (trimmedOld === trimmedNew) {
+      throw new Error('Mật khẩu mới không được trùng với mật khẩu hiện tại.');
+    }
+
+    const admins = await firestoreService.getSystemAdmins();
+    const target = admins.find(a => 
+      (a.username && a.username.toLowerCase() === trimmedId) ||
+      (a.email && a.email.toLowerCase() === trimmedId) ||
+      (trimmedId === 'admin' && (a.username === 'admin' || a.id === 'admin-root')) ||
+      (trimmedId === 'admin@v4.hq' && (a.email === 'admin@v4.hq' || a.id === 'admin-root'))
+    );
+
+    if (!target) {
+      throw new Error('Không tìm thấy tài khoản quản trị viên trong hệ thống.');
+    }
+
+    if (target.isLocked || target.status === 'INACTIVE') {
+      throw new Error('Tài khoản quản trị này hiện đang bị khóa. Vui lòng liên hệ Quản trị tối cao.');
+    }
+
+    const currentSavedPass = target.password || '123@abc';
+    if (currentSavedPass !== trimmedOld) {
+      throw new Error('Mật khẩu hiện tại không chính xác!');
+    }
+
+    const now = new Date().toISOString();
+    const updated = await firestoreService.updateSystemAdmin(target.id, {
+      password: trimmedNew,
+      lastPasswordChangedAt: now,
+      updatedAt: now
+    });
+
+    if (target.isRoot || target.id === 'admin-root' || target.username === 'admin') {
+      try {
+        localStorage.setItem('hq_root_admin_pwd', trimmedNew);
+      } catch {}
+    }
+
+    return {
+      success: true,
+      message: 'Đổi mật khẩu tài khoản quản trị thành công! Đồng chí có thể sử dụng mật khẩu mới để đăng nhập.',
+      admin: updated
+    };
+  },
+
+  listenSystemAdmins: (callback: (admins: SystemAdmin[]) => void) => {
+    const colRef = collection(db, 'system_admins');
+    return onSnapshot(colRef, (snapshot) => {
+      let list = snapshot.docs.map(d => ({ ...(d.data() as any), id: d.id }) as SystemAdmin);
+      if (!list.some(a => a.isRoot || a.id === 'admin-root' || a.username === 'admin')) {
+        let rootPass = '123@abc';
+        try {
+          const saved = localStorage.getItem('hq_root_admin_pwd');
+          if (saved) rootPass = saved;
+        } catch {}
+        list.unshift({
+          id: 'admin-root',
+          username: 'admin',
+          email: 'admin@v4.hq',
+          fullName: 'Ban Tuyên Huấn - Bộ Tư lệnh Vùng 4 Hải Quân',
+          rank: 'Đại tá',
+          position: 'Chủ nhiệm Chính trị Vùng 4',
+          rankAndPosition: 'Đại tá - Chủ nhiệm Chính trị Vùng 4',
+          unitName: 'Bộ Tư lệnh Vùng 4 Hải Quân',
+          password: rootPass,
+          role: 'SUPER_ADMIN',
+          isRoot: true,
+          canManageAdmins: true,
+          status: 'ACTIVE',
+          isLocked: false,
+          notes: 'Tài khoản Quản trị tối cao của Hệ thống GDCT Vùng 4',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: new Date().toISOString()
+        });
+      }
+      list.sort((a, b) => {
+        if (a.isRoot) return -1;
+        if (b.isRoot) return 1;
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
+      callback(list);
+    }, (err) => {
+      console.warn('[listenSystemAdmins warning]:', err);
+      firestoreService.getSystemAdmins().then(callback).catch(() => callback([]));
     });
   }
 };

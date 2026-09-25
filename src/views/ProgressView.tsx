@@ -273,10 +273,29 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
     });
 
     return filteredUsers.map((u) => {
-      const userProg = progressList.filter(
+      const rawUserProg = progressList.filter(
         (p) => p.userId === u.id || (p.userName && p.userName.trim().toLowerCase() === (u.fullName || u.name || '').trim().toLowerCase())
       );
-      const totalLessons = Math.max(totalCurriculumLessons, userProg.length, 3);
+      // Deduplicate by lessonId or title to prevent duplicate records if lessons were renamed
+      const progByLesson = new Map<string, UserProgress>();
+      rawUserProg.forEach(p => {
+        const key = p.lessonId || removeVietnameseTones(p.lessonTitle || '').toLowerCase().trim();
+        if (!key) return;
+        const existing = progByLesson.get(key);
+        if (!existing) {
+          progByLesson.set(key, p);
+        } else {
+          const isPCompl = Boolean(p.completed || (p as any).isCompleted || (p as any).hoanThanh || (p as any).daDat);
+          const isExCompl = Boolean(existing.completed || (existing as any).isCompleted || (existing as any).hoanThanh || (existing as any).daDat);
+          if (isPCompl && !isExCompl) {
+            progByLesson.set(key, p);
+          } else if ((p.overallProgress || 0) > (existing.overallProgress || 0)) {
+            progByLesson.set(key, p);
+          }
+        }
+      });
+      const userProg = Array.from(progByLesson.values());
+      const totalLessons = totalCurriculumLessons > 0 ? totalCurriculumLessons : Math.max(userProg.length, 1);
       const completedLessons = userProg.filter(
         (p) => Boolean(p.completed || (p as any).isCompleted || (p as any).hoanThanh || (p as any).daDat)
       ).length;
@@ -394,16 +413,16 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
 
   // Aggregate Lesson-based Progress Report Data with unit breakdown
   const lessonReportData = useMemo<LessonReportRow[]>(() => {
-    // 1. Gather all unique lessons across lessons, courses, and progressList
+    // 1. Gather all unique lessons across active curriculum lessons and courses
     const lessonMap = new Map<string, { id: string; title: string; year: number; courseTitle?: string }>();
 
-    // From lessons prop
+    // From lessons prop (official curriculum lessons)
     (lessons || []).forEach((l) => {
       if (!l.isDeleted && l.status !== 'ARCHIVED' && l.title && l.title.trim()) {
-        const norm = removeVietnameseTones(l.title).toLowerCase().trim();
+        const key = l.id || removeVietnameseTones(l.title).toLowerCase().trim();
         const yr = Number(l.year) || Number(l.courseYear) || 2026;
-        lessonMap.set(norm, {
-          id: l.id || norm,
+        lessonMap.set(key, {
+          id: l.id || key,
           title: l.title.trim(),
           year: yr,
           courseTitle: l.courseTitle || ''
@@ -411,15 +430,15 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
       }
     });
 
-    // From courses prop
+    // From courses prop (ensure all active course lessons appear)
     (courses || []).forEach((c) => {
       const cYear = Number(c.year) || 2026;
       (c.lessons || []).forEach((l) => {
         if (!l.isDeleted && l.status !== 'ARCHIVED' && l.title && l.title.trim()) {
-          const norm = removeVietnameseTones(l.title).toLowerCase().trim();
-          if (!lessonMap.has(norm)) {
-            lessonMap.set(norm, {
-              id: l.id || norm,
+          const key = l.id || removeVietnameseTones(l.title).toLowerCase().trim();
+          if (!lessonMap.has(key)) {
+            lessonMap.set(key, {
+              id: l.id || key,
               title: l.title.trim(),
               year: Number(l.year) || Number(l.courseYear) || cYear,
               courseTitle: l.courseTitle || c.title || ''
@@ -429,43 +448,45 @@ export const ProgressView: React.FC<ProgressViewProps> = ({
       });
     });
 
-    // From progressList records (ensure all studied lessons appear)
-    (progressList || []).forEach((p) => {
-      if (p.lessonTitle && p.lessonTitle.trim()) {
-        const title = p.lessonTitle.trim();
-        const norm = removeVietnameseTones(title).toLowerCase().trim();
-        if (!lessonMap.has(norm)) {
-          let yr = 2026;
-          const dateStr = p.updatedAt || p.createdAt || p.lastAccessedAt;
-          if (dateStr) {
-            const parsed = new Date(dateStr).getFullYear();
-            if (!isNaN(parsed) && parsed >= 2020 && parsed <= 2030) yr = parsed;
-          }
-          lessonMap.set(norm, {
-            id: p.lessonId || norm,
-            title: title,
-            year: yr,
-            courseTitle: p.courseTitle || ''
-          });
-        }
-      }
-    });
-
-    // Standard fallback if completely empty
+    // Fallback ONLY IF curriculum is completely empty (no lessons or courses configured yet)
     if (lessonMap.size === 0) {
-      lessonMap.set('tang cuong cong tac dan van', {
+      (progressList || []).forEach((p) => {
+        if (p.lessonTitle && p.lessonTitle.trim()) {
+          const title = p.lessonTitle.trim();
+          const key = p.lessonId || removeVietnameseTones(title).toLowerCase().trim();
+          if (!lessonMap.has(key)) {
+            let yr = 2026;
+            const dateStr = p.updatedAt || p.createdAt || p.lastAccessedAt;
+            if (dateStr) {
+              const parsed = new Date(dateStr).getFullYear();
+              if (!isNaN(parsed) && parsed >= 2020 && parsed <= 2030) yr = parsed;
+            }
+            lessonMap.set(key, {
+              id: p.lessonId || key,
+              title: title,
+              year: yr,
+              courseTitle: p.courseTitle || ''
+            });
+          }
+        }
+      });
+    }
+
+    // Standard fallback if still completely empty
+    if (lessonMap.size === 0) {
+      lessonMap.set('core-1', {
         id: 'core-1',
         title: 'Tăng cường công tác dân vận của Quân đội trên địa bàn trọng điểm về Quốc phòng an ninh',
         year: 2026,
         courseTitle: 'Giáo dục chính trị (GDCT)'
       });
-      lessonMap.set('xay dung dang bo', {
+      lessonMap.set('core-2', {
         id: 'core-2',
         title: 'Xây dựng Đảng bộ Quân chủng và Vùng 4 Hải quân trong sạch vững mạnh',
         year: 2026,
         courseTitle: 'Giáo dục chính trị (GDCT)'
       });
-      lessonMap.set('truyen thong tran dau', {
+      lessonMap.set('core-3', {
         id: 'core-3',
         title: 'Phát huy truyền thống vẻ vang đánh thắng trận đầu của Hải quân nhân dân Việt Nam',
         year: 2026,
