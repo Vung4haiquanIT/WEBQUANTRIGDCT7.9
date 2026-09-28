@@ -12,12 +12,14 @@ import {
   TrendingUp,
   FileCheck,
   ShieldAlert,
-  Calendar
+  Calendar,
+  UserCheck
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, LabelList } from 'recharts';
 import { DashboardStats, Course, Lesson, Unit, User, UserProgress, SystemNotification } from '../types';
 import { DongSonDrum, DongSonBorder } from '../components/DongSonMotif';
 import { removeVietnameseTones } from '../utils/vietnamese';
+import { getCreatorUsername } from '../utils/creatorHelper';
 
 interface DashboardViewProps {
   stats?: DashboardStats | null;
@@ -735,7 +737,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200">
                           v{lesson.version}
                         </span>
-                        <span className="text-[10px] text-slate-500 truncate">{lesson.courseTitle}</span>
+                        <span className="text-[10px] text-slate-400 truncate">{lesson.courseTitle}</span>
+                        <span className="text-[10px] text-slate-400 font-normal">
+                          tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(lesson)}</span>
+                        </span>
                       </div>
                       <h4 className="text-xs font-bold text-slate-900 group-hover:text-blue-600 truncate mt-0.5">
                         {lesson.title}
@@ -787,7 +792,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <span className="text-slate-400 font-mono text-[10px]">{act.time}</span>
                   </div>
                   <div className="text-slate-600 mt-1 line-clamp-1">{act.target}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">Thực hiện: {act.user}</div>
+                  <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                    <span>tạo bởi:</span>
+                    <span className="text-slate-600 font-medium">
+                      {act.user ? (act.user.startsWith('@') ? act.user.slice(1) : act.user) : 'admin'}
+                    </span>
+                  </div>
                 </div>
               ))
             )}

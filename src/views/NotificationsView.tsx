@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Send, ShieldAlert, Trash2, Plus } from 'lucide-react';
+import { Send, ShieldAlert, Trash2, Plus, UserCheck } from 'lucide-react';
 import { SystemNotification, Unit } from '../types';
+import { getCreatorUsername, getActiveAdminUsername, getActiveAdminFullName } from '../utils/creatorHelper';
 
 interface NotificationsViewProps {
   notifications: SystemNotification[];
   units: Unit[];
+  currentUser?: any;
   onCreateNotification: (data: Partial<SystemNotification>) => Promise<void>;
   onDeleteNotification: (id: string) => Promise<void>;
 }
@@ -12,6 +14,7 @@ interface NotificationsViewProps {
 export const NotificationsView: React.FC<NotificationsViewProps> = ({
   notifications,
   units,
+  currentUser,
   onCreateNotification,
   onDeleteNotification,
 }) => {
@@ -29,7 +32,15 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
     e.preventDefault();
     if (!formData.title.trim() || !formData.content.trim()) return;
 
-    await onCreateNotification(formData);
+    const adminUsername = getActiveAdminUsername(currentUser);
+    const adminFullName = getActiveAdminFullName(currentUser);
+
+    await onCreateNotification({
+      ...formData,
+      createdBy: adminFullName,
+      createdByUsername: adminUsername,
+      createdByName: adminFullName,
+    });
     setFormData({
       title: '',
       content: '',
@@ -127,6 +138,9 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
                     <span className="text-[10px] text-slate-500 font-mono">
                       Gửi tới: {notif.targetUnitId === 'ALL' ? 'Toàn bộ cán bộ chiến sĩ' : notif.targetUnitId}
                     </span>
+                    <span className="text-[11px] text-slate-400 font-normal">
+                      tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(notif)}</span>
+                    </span>
                   </div>
 
                   <h3 className="text-sm font-bold text-slate-800 mt-1">{notif.title}</h3>
@@ -157,6 +171,12 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
           <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl p-5 space-y-4">
             <h3 className="text-sm font-bold text-slate-800 uppercase">Phát lệnh Thông báo / Chỉ thị</h3>
             <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+              {/* Creator info */}
+              <div className="text-slate-500 text-xs flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-slate-400">Tạo bởi:</span>
+                <span className="text-slate-700 font-medium">{getActiveAdminFullName(currentUser)}</span>
+              </div>
+
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">Tiêu đề thông báo *</label>
                 <input

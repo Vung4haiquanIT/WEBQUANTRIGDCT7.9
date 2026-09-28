@@ -60,7 +60,8 @@ import {
   FileVideo,
   RotateCcw,
   Pencil,
-  X
+  X,
+  UserCheck
 } from 'lucide-react';
 import { 
   Lesson, 
@@ -88,6 +89,7 @@ import { parseDocumentFile, generateQuestionsForContent, ParsedDocumentResult } 
 import { QuillEditor } from '../components/QuillEditor';
 import { UniversalVideoPlayer } from '../components/UniversalVideoPlayer';
 import { parseVideoUrl, getEffectiveVideoThumbnail } from '../utils/videoHelper';
+import { getCreatorUsername } from '../utils/creatorHelper';
 
 // Uncle Ho Navy / Military Teaching Templates for Quick-Fill
 const UNCLE_HO_PRESETS = [
@@ -159,6 +161,7 @@ const UNCLE_HO_PRESETS = [
 
 interface LessonEditorViewProps {
   lesson: Lesson;
+  currentUser?: any;
   onBack: () => void;
   onPreview: (lesson: Lesson) => void;
   onLessonUpdated: (updatedLesson: Lesson) => void;
@@ -166,6 +169,7 @@ interface LessonEditorViewProps {
 
 export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   lesson,
+  currentUser,
   onBack,
   onPreview,
   onLessonUpdated,
@@ -1754,6 +1758,9 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
               )}
               <span className="text-[10px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                 v{currentLesson.version}
+              </span>
+              <span className="text-[11px] text-slate-400 font-normal">
+                tạo bởi: <span className="text-slate-600 font-medium">{getCreatorUsername(currentLesson)}</span>
               </span>
               <span className="text-[10px] text-slate-500 font-mono">
                 Cập nhật: {new Date(currentLesson.updatedAt).toLocaleTimeString('vi-VN')}

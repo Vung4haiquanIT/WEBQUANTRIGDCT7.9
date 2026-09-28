@@ -30,15 +30,17 @@ import {
   Layers,
   FileAudio,
   Repeat,
-  RadioTower
+  RadioTower,
+  UserCheck
 } from 'lucide-react';
 import { RadioBroadcast, RadioCategory, Unit, User } from '../types';
 import { api } from '../services/api';
 import { DongSonDrum } from '../components/DongSonMotif';
+import { getCreatorUsername, getActiveAdminUsername, getActiveAdminFullName } from '../utils/creatorHelper';
 
 interface RadioBroadcastViewProps {
   units?: Unit[];
-  currentUser?: User;
+  currentUser?: any;
 }
 
 const CATEGORY_MAP: Record<RadioCategory, { label: string; badgeColor: string; icon: string }> = {
@@ -333,6 +335,9 @@ export const RadioBroadcastView: React.FC<RadioBroadcastViewProps> = ({ units = 
         finalFileSizeMb = Math.round((uploadRes.bytes / (1024 * 1024)) * 100) / 100;
       }
 
+      const adminUsername = getActiveAdminUsername(currentUser);
+      const adminFullName = getActiveAdminFullName(currentUser);
+
       const payload: Partial<RadioBroadcast> = {
         title: formTitle.trim(),
         description: formDescription.trim(),
@@ -353,7 +358,12 @@ export const RadioBroadcastView: React.FC<RadioBroadcastViewProps> = ({ units = 
       if (editingItem) {
         await api.updateRadioBroadcast(editingItem.id, payload);
       } else {
-        await api.createRadioBroadcast(payload);
+        await api.createRadioBroadcast({
+          ...payload,
+          createdBy: adminFullName,
+          createdByUsername: adminUsername,
+          createdByName: adminFullName
+        });
       }
 
       setIsModalOpen(false);
@@ -595,11 +605,17 @@ export const RadioBroadcastView: React.FC<RadioBroadcastViewProps> = ({ units = 
                 >
                   {/* Top: Category Badge, Date, Status */}
                   <div>
-                    <div className="flex items-center justify-between gap-2 mb-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${catMeta.badgeColor}`}>
-                        <span className="mr-1">{catMeta.icon}</span>
-                        <span>{catMeta.label}</span>
-                      </span>
+                    <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${catMeta.badgeColor}`}>
+                          <span className="mr-1">{catMeta.icon}</span>
+                          <span>{catMeta.label}</span>
+                        </span>
+
+                        <span className="text-[11px] text-slate-400 font-normal">
+                          tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(item)}</span>
+                        </span>
+                      </div>
 
                       <div className="flex items-center space-x-2">
                         <span className="text-xs text-slate-500 font-medium flex items-center space-x-1">
@@ -896,6 +912,12 @@ export const RadioBroadcastView: React.FC<RadioBroadcastViewProps> = ({ units = 
                   <span>{formError}</span>
                 </div>
               )}
+
+              {/* Creator info */}
+              <div className="text-slate-500 text-xs flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-slate-400">Tạo bởi:</span>
+                <span className="text-slate-700 font-medium">{editingItem?.createdByName || editingItem?.createdBy || getActiveAdminFullName(currentUser)}</span>
+              </div>
 
               {/* Title */}
               <div>

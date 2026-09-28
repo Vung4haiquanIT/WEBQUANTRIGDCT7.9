@@ -137,6 +137,8 @@ export interface Course {
   lessonCount?: number;
   publishedLessonCount?: number;
   createdBy: string;
+  createdByUsername?: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -181,6 +183,8 @@ export interface Lesson {
   sourceDocument?: SourceDocument;
   durationMinutes?: number;
   createdBy: string;
+  createdByUsername?: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -447,6 +451,9 @@ export interface SystemNotification {
   priority: 'HIGH' | 'NORMAL' | 'URGENT';
   targetUnitId?: string; // 'ALL' or specific unitId
   sentBy: string;
+  createdBy?: string;
+  createdByUsername?: string;
+  createdByName?: string;
   createdAt: string;
 }
 
@@ -806,6 +813,9 @@ export interface AppBanner {
   backgroundColor?: string;
   order: number; // 1 to 5
   isActive: boolean;
+  createdBy?: string;
+  createdByUsername?: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -832,6 +842,8 @@ export interface ExamBank {
   totalQuestions: number;
   questions?: ExamQuestion[];
   createdBy: string;
+  createdByUsername?: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -854,6 +866,8 @@ export interface ExamSession {
   startTime?: string;
   endTime?: string;
   createdBy: string;
+  createdByUsername?: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -959,6 +973,9 @@ export interface RadioBroadcast {
   status: 'PUBLISHED' | 'DRAFT' | 'ARCHIVED'; // Trạng thái phát hành
   playCount: number;                // Số lượt nghe
   order: number;
+  createdBy?: string;
+  createdByUsername?: string;
+  createdByName?: string;
   createdAt: string;
   updatedAt: string;
 }

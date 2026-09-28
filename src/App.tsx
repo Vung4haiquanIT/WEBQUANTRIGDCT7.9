@@ -202,7 +202,13 @@ export function App() {
   // Course CRUD Handlers
   // -------------------------------------------------------------
   const handleCreateCourse = async (data: Partial<Course>) => {
-    await api.createCourse(data);
+    const payload: Partial<Course> = {
+      ...data,
+      createdByUsername: data.createdByUsername || adminUser?.username || 'admin',
+      createdByName: data.createdByName || adminUser?.fullName || adminUser?.name || 'Phòng Chính trị Vùng 4',
+      createdBy: data.createdBy || adminUser?.username || 'Phòng Chính trị Vùng 4'
+    };
+    await api.createCourse(payload);
     await fetchAllData();
   };
 
@@ -234,7 +240,13 @@ export function App() {
   // Lesson CRUD Handlers
   // -------------------------------------------------------------
   const handleCreateLesson = async (data: Partial<Lesson>) => {
-    await api.createLesson(data);
+    const payload: Partial<Lesson> = {
+      ...data,
+      createdByUsername: data.createdByUsername || adminUser?.username || 'admin',
+      createdByName: data.createdByName || adminUser?.fullName || adminUser?.name || 'Ban Tuyên huấn Vùng 4',
+      createdBy: data.createdBy || adminUser?.username || 'Ban Tuyên huấn Vùng 4'
+    };
+    await api.createLesson(payload);
     await fetchAllData();
   };
 
@@ -327,7 +339,13 @@ export function App() {
   // Notification Handlers
   // -------------------------------------------------------------
   const handleCreateNotification = async (data: Partial<SystemNotification>) => {
-    await api.createNotification(data);
+    const payload: Partial<SystemNotification> = {
+      ...data,
+      createdByUsername: data.createdByUsername || adminUser?.username || 'admin',
+      createdByName: data.createdByName || adminUser?.fullName || adminUser?.name || 'Ban Tuyên huấn Vùng 4',
+      sentBy: data.sentBy || adminUser?.fullName || adminUser?.name || 'Ban Tuyên huấn Vùng 4'
+    };
+    await api.createNotification(payload);
     await fetchAllData();
   };
 
@@ -435,6 +453,7 @@ export function App() {
             ) : selectedLessonForEditing ? (
               <LessonEditorView
                 lesson={selectedLessonForEditing}
+                currentUser={adminUser}
                 onBack={() => setSelectedLessonForEditing(null)}
                 onPreview={(l) => setPreviewLesson(l)}
                 onLessonUpdated={(updated) => {
@@ -459,6 +478,7 @@ export function App() {
               <CoursesView
                 courses={courses}
                 lessons={lessons}
+                currentUser={adminUser}
                 onSelectLesson={(l) => setSelectedLessonForEditing(l)}
                 onPreviewLesson={(l) => setPreviewLesson(l)}
                 onCreateCourse={handleCreateCourse}
@@ -497,6 +517,7 @@ export function App() {
                 banners={banners}
                 courses={courses}
                 lessons={lessons}
+                currentUser={adminUser}
                 onRefresh={fetchAllData}
               />
             ) : currentView === 'progress' ? (
@@ -511,6 +532,7 @@ export function App() {
               <NotificationsView
                 notifications={notifications}
                 units={units}
+                currentUser={adminUser}
                 onCreateNotification={handleCreateNotification}
                 onDeleteNotification={handleDeleteNotification}
               />

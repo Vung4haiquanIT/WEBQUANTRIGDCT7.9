@@ -21,8 +21,10 @@ import {
   CheckCircle,
   XCircle,
   Smartphone,
-  AlertTriangle
+  AlertTriangle,
+  UserCheck
 } from 'lucide-react';
+import { getCreatorUsername, getActiveAdminUsername, getActiveAdminFullName } from '../utils/creatorHelper';
 
 /**
  * Vietnam Navy Crest / Emblem
@@ -116,11 +118,13 @@ interface BannersViewProps {
   banners: AppBanner[];
   courses: Course[];
   lessons: Lesson[];
+  currentUser?: any;
   onRefresh: () => Promise<void>;
 }
 
 export const BannersView: React.FC<BannersViewProps> = ({
   banners,
+  currentUser,
   onRefresh
 }) => {
   // Local synchronized list for optimistic updates
@@ -395,9 +399,14 @@ export const BannersView: React.FC<BannersViewProps> = ({
       if (editingBanner) {
         await api.updateBanner(editingBanner.id, payload);
       } else {
+        const adminUsername = getActiveAdminUsername(currentUser);
+        const adminFullName = getActiveAdminFullName(currentUser);
         await api.createBanner({
           ...payload,
           order: Number(formData.order) || (currentBannerCount + 1),
+          createdBy: adminFullName,
+          createdByUsername: adminUsername,
+          createdByName: adminFullName,
         });
       }
       setIsModalOpen(false);
@@ -744,22 +753,30 @@ export const BannersView: React.FC<BannersViewProps> = ({
 
                         {/* Title & Info */}
                         {hasImage ? (
-                          <div className="min-w-0 flex-1 pr-2">
+                          <div className="min-w-0 flex-1 pr-2 flex items-center justify-between gap-2 flex-wrap">
                             <span className="text-xs font-semibold text-slate-700">
                               Poster hình ảnh
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-normal">
+                              tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(b)}</span>
                             </span>
                           </div>
                         ) : (
                           <div className="min-w-0 flex-1 pr-2">
-                            <div className="flex items-center space-x-2">
-                              <span className="font-semibold text-slate-800 text-xs truncate">
-                                {b.title || 'Khẩu hiệu'}
-                              </span>
-                              {b.badgeText && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-sm shrink-0 bg-amber-50 text-amber-800 border border-amber-200">
-                                  {b.badgeText}
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center space-x-2 min-w-0">
+                                <span className="font-semibold text-slate-800 text-xs truncate">
+                                  {b.title || 'Khẩu hiệu'}
                                 </span>
-                              )}
+                                {b.badgeText && (
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-sm shrink-0 bg-amber-50 text-amber-800 border border-amber-200">
+                                    {b.badgeText}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-slate-400 font-normal">
+                                tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(b)}</span>
+                              </span>
                             </div>
                             {b.subtitle && (
                               <div className="text-[11px] text-slate-500 truncate mt-0.5">
@@ -876,6 +893,11 @@ export const BannersView: React.FC<BannersViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+              {/* Creator info */}
+              <div className="text-slate-500 text-xs flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-slate-400">Tạo bởi:</span>
+                <span className="text-slate-700 font-medium">{editingBanner?.createdByName || editingBanner?.createdBy || getActiveAdminFullName(currentUser)}</span>
+              </div>
               
               {/* LIVE PREVIEW INSIDE MODAL */}
               <div>

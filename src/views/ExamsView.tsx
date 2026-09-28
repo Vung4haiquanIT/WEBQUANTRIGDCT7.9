@@ -3,13 +3,15 @@ import {
   FileSpreadsheet, Plus, Upload, Play, CheckCircle2, XCircle, Clock, Calendar,
   Award, ShieldCheck, Download, Trash2, Eye, RefreshCw, Search, Filter,
   Users, Layers, ArrowRight, AlertCircle, FileText, Check, X, Smartphone, BarChart3,
-  Edit3, TrendingUp, Medal, ChevronRight, Printer, HelpCircle, CheckCircle
+  Edit3, TrendingUp, Medal, ChevronRight, Printer, HelpCircle, CheckCircle,
+  UserCheck
 } from 'lucide-react';
 import { ExamBank, ExamQuestion, ExamSession, ExamSubmission, Unit, User, UserProgress } from '../types';
 import { api } from '../services/api';
 import { db, doc, getDoc } from '../services/firebase';
 import { parseExamQuestionsFromExcel, downloadSampleExamExcelTemplate, ParsedExamExcelResult } from '../utils/excelExamParser';
 import { matchSearch } from '../utils/vietnamese';
+import { getCreatorUsername, getActiveAdminUsername, getActiveAdminFullName } from '../utils/creatorHelper';
 import * as XLSX from 'xlsx';
 
 interface ExamsViewProps {
@@ -633,16 +635,20 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
     setIsImporting(true);
     try {
+      const adminUsername = getActiveAdminUsername(currentUser);
+      const adminFullName = getActiveAdminFullName(currentUser);
       const created = await api.createExamBank(
         {
           title: newBankTitle.trim(),
           description: newBankDescription.trim(),
-          createdBy: currentUser?.name || 'Phòng Chính trị Vùng 4'
+          createdBy: adminFullName,
+          createdByUsername: adminUsername,
+          createdByName: adminFullName
         },
         parsedExcelResult.questions
       );
 
-      alert(`Đã lưu thành công Bộ đề "${created.title}" với ${parsedExcelResult.questions.length} câu hỏi!`);
+      alert(`Đã lưu thành công Bộ đề "${created.title}" với ${parsedExcelResult.questions.length} câu hỏi! (Người tạo: @${adminUsername})`);
       setIsNewBankModalOpen(false);
       setExcelFile(null);
       setParsedExcelResult(null);
@@ -797,6 +803,8 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
         setSessions(prev => prev.map(s => s.id === editingSession.id ? updated : s));
         alert(`Đã lưu thay đổi đợt kiểm tra "${updated.title}"! Trạng thái: ${computedAuto.label}. Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       } else {
+        const adminUsername = getActiveAdminUsername(currentUser);
+        const adminFullName = getActiveAdminFullName(currentUser);
         const created = await api.createExamSession({
           title: sessionFormData.title.trim(),
           description: sessionFormData.description.trim(),
@@ -812,11 +820,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           startTime: startIso,
           endTime: endIso,
           status: computedAuto.status,
-          createdBy: currentUser?.name || 'Phòng Chính trị Vùng 4'
+          createdBy: adminFullName,
+          createdByUsername: adminUsername,
+          createdByName: adminFullName
         });
 
         setSessions(prev => [created, ...prev.filter(s => s.id !== created.id)]);
-        alert(`Đã khởi tạo đợt kiểm tra mới "${created.title}"! Trạng thái: ${computedAuto.label}. Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
+        alert(`Đã khởi tạo đợt kiểm tra mới "${created.title}"! (Người tạo: @${adminUsername}) Trạng thái: ${computedAuto.label}. Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       }
 
       setIsNewSessionModalOpen(false);
@@ -1431,21 +1441,25 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                     className="bg-white border border-slate-200/90 rounded-3xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4"
                   >
                     <div>
-                      <div className="flex items-center justify-between gap-2 mb-2">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${sessionStatusInfo.badgeClass}`}
-                        >
-                          <span className={`w-1.5 h-1.5 rounded-full ${sessionStatusInfo.dotClass}`} />
-                          <span className="uppercase tracking-wider">
-                            {sessionStatusInfo.label}
-                          </span>
-                        </span>
-
+                      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                         <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border ${sessionStatusInfo.badgeClass}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${sessionStatusInfo.dotClass}`} />
+                            <span className="uppercase tracking-wider">
+                              {sessionStatusInfo.label}
+                            </span>
+                          </span>
+
                           <span className="text-[10px] font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-bold">
                             Đối tượng: {formatTargetGroupDisplay(session.targetGroup)}
                           </span>
                         </div>
+
+                        <span className="text-[11px] text-slate-400 font-normal">
+                          tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(session)}</span>
+                        </span>
                       </div>
 
                       <h3 className="text-base font-bold text-slate-900 hover:text-blue-600 transition-colors">
@@ -1624,13 +1638,19 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                   className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4"
                 >
                   <div>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                        <FileSpreadsheet className="w-3.5 h-3.5" />
-                        <span>Bộ đề Excel</span>
-                      </span>
-                      <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-lg border border-slate-200 font-mono">
-                        {bank.totalQuestions} câu hỏi
+                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          <span>Bộ đề Excel</span>
+                        </span>
+                        <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2.5 py-0.5 rounded-lg border border-slate-200 font-mono">
+                          {bank.totalQuestions} câu hỏi
+                        </span>
+                      </div>
+
+                      <span className="text-[11px] text-slate-400 font-normal">
+                        tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(bank)}</span>
                       </span>
                     </div>
 
@@ -1639,8 +1659,9 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
                       <p className="text-xs text-slate-500 mt-1 line-clamp-2">{bank.description}</p>
                     )}
 
-                    <div className="mt-3 text-[11px] text-slate-400">
-                      Tạo bởi: <span className="font-semibold text-slate-700">{bank.createdBy}</span> • {new Date(bank.createdAt).toLocaleDateString('vi-VN')}
+                    <div className="mt-3 text-[11px] text-slate-500 flex items-center justify-between flex-wrap gap-2">
+                      <span>Tạo bởi: <strong className="font-semibold text-slate-800">{bank.createdByName || bank.createdBy || 'Phòng Chính trị Vùng 4'}</strong></span>
+                      <span className="font-mono text-slate-400">{new Date(bank.createdAt).toLocaleDateString('vi-VN')}</span>
                     </div>
                   </div>
 
@@ -2045,6 +2066,12 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             </div>
 
             <form onSubmit={handleSaveBankFromExcel} className="p-5 overflow-y-auto space-y-4 text-xs flex-1">
+              {/* Creator info */}
+              <div className="text-slate-500 text-xs flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-slate-400">Tạo bởi:</span>
+                <span className="text-slate-700 font-medium">{getActiveAdminFullName(currentUser)}</span>
+              </div>
+
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Tên Bộ Đề Thi *</label>
                 <input
@@ -2197,6 +2224,12 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
             </div>
 
             <form onSubmit={handleSaveSessionSubmit} className="p-5 space-y-4 text-xs">
+              {/* Creator info */}
+              <div className="text-slate-500 text-xs flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-slate-400">Tạo bởi:</span>
+                <span className="text-slate-700 font-medium">{editingSession?.createdByName || editingSession?.createdBy || getActiveAdminFullName(currentUser)}</span>
+              </div>
+
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Tên Đợt Kiểm Tra *</label>
                 <input

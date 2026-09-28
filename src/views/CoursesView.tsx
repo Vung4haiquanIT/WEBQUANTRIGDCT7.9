@@ -23,7 +23,8 @@ import {
   Upload,
   Image as ImageIcon,
   Lock,
-  Settings
+  Settings,
+  UserCheck
 } from 'lucide-react';
 import { Course, Lesson, PublishStatus } from '../types';
 import { DongSonDrum } from '../components/DongSonMotif';
@@ -34,10 +35,12 @@ import {
   FIXED_COURSES_DEFINITIONS 
 } from '../utils/fixedCourses';
 import { matchSearch } from '../utils/vietnamese';
+import { getCreatorUsername, getActiveAdminUsername, getActiveAdminFullName } from '../utils/creatorHelper';
 
 interface CoursesViewProps {
   courses: Course[];
   lessons: Lesson[];
+  currentUser?: any;
   onSelectLesson: (lesson: Lesson) => void;
   onPreviewLesson: (lesson: Lesson) => void;
   onCreateCourse: (course: Partial<Course>) => Promise<void>;
@@ -52,6 +55,7 @@ interface CoursesViewProps {
 export const CoursesView: React.FC<CoursesViewProps> = ({
   courses,
   lessons,
+  currentUser,
   onSelectLesson,
   onPreviewLesson,
   onCreateCourse,
@@ -106,6 +110,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     status: 'REVIEW' as PublishStatus,
     isFixed: false,
     createdBy: 'Phòng Chính trị Vùng 4',
+    createdByUsername: 'admin',
+    createdByName: 'Phòng Chính trị Vùng 4',
   });
 
   // Modal state for Lesson
@@ -122,6 +128,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     showVideos: true,
     showAudios: true,
     createdBy: 'Ban Tuyên huấn Vùng 4',
+    createdByUsername: 'admin',
+    createdByName: 'Ban Tuyên huấn Vùng 4',
     year: 2026,
   });
 
@@ -147,13 +155,17 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
   const handleOpenNewCourse = () => {
     setEditingCourse(null);
+    const activeUsername = getActiveAdminUsername(currentUser);
+    const activeFullName = getActiveAdminFullName(currentUser);
     setCourseFormData({
       title: '',
-      year: 2026,
+      year: new Date().getFullYear(),
       thumbnail: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80',
       status: 'REVIEW',
       isFixed: false,
-      createdBy: 'Phòng Chính trị Vùng 4',
+      createdBy: activeUsername,
+      createdByUsername: activeUsername,
+      createdByName: activeFullName,
     });
     setIsCourseModalOpen(true);
   };
@@ -168,6 +180,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       status: course.status || 'REVIEW',
       isFixed,
       createdBy: course.createdBy,
+      createdByUsername: course.createdByUsername || getCreatorUsername(course),
+      createdByName: course.createdByName || course.createdBy,
     });
     setIsCourseModalOpen(true);
   };
@@ -235,6 +249,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     setSelectedCourseForNewLesson(courseId);
     const parentCourse = courses.find((c) => c.id === courseId);
     const courseYear = parentCourse?.year || ((parentCourse?.title || '').match(/20\d{2}/) ? parseInt((parentCourse?.title || '').match(/20\d{2}/)![0], 10) : new Date().getFullYear());
+    const activeUsername = getActiveAdminUsername(currentUser);
+    const activeFullName = getActiveAdminFullName(currentUser);
     setLessonFormData({
       courseId,
       title: '',
@@ -244,7 +260,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       showContents: true,
       showVideos: true,
       showAudios: true,
-      createdBy: 'Ban Tuyên huấn Vùng 4',
+      createdBy: activeUsername,
+      createdByUsername: activeUsername,
+      createdByName: activeFullName,
       year: courseYear,
     });
     setIsLessonModalOpen(true);
@@ -265,6 +283,8 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       showVideos: lesson.moduleConfig?.showVideos !== false,
       showAudios: lesson.moduleConfig?.showAudios !== false,
       createdBy: lesson.createdBy || 'Ban Tuyên huấn Vùng 4',
+      createdByUsername: lesson.createdByUsername || getCreatorUsername(lesson),
+      createdByName: lesson.createdByName || lesson.createdBy,
       year: lessonYear,
     });
     setIsLessonModalOpen(true);
@@ -533,6 +553,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                               ? 'Nội bộ'
                               : 'Chờ thẩm định'}
                           </span>
+                          <span className="text-[11px] text-slate-400 font-normal">
+                            tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(course)}</span>
+                          </span>
                           <span className="text-[11px] text-slate-400 font-medium ml-1">
                             ({courseLessons.length} bài học)
                           </span>
@@ -643,6 +666,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                                         ? 'Nội bộ'
                                         : 'Chờ thẩm định'}
                                     </span>
+                                    <span className="text-[11px] text-slate-400 font-normal">
+                                      tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(lesson)}</span>
+                                    </span>
                                   </div>
 
                                   <h4 className="text-sm font-bold text-slate-900 group-hover:text-blue-600 mt-1 truncate">
@@ -745,6 +771,12 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
             </div>
 
             <form onSubmit={handleSubmitCourse} className="p-5 space-y-4 text-xs">
+              {/* Creator info */}
+              <div className="text-slate-500 text-xs flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-slate-400">Tạo bởi:</span>
+                <span className="text-slate-700 font-medium">{courseFormData.createdByName || courseFormData.createdBy || getActiveAdminFullName(currentUser)}</span>
+              </div>
+
               <div>
                 <label className="block text-slate-700 font-bold mb-1">Tiêu đề chuyên đề *</label>
                 <input
@@ -890,6 +922,12 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* Creator info */}
+              <div className="text-slate-500 text-xs flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                <span className="text-slate-400">Tạo bởi:</span>
+                <span className="text-slate-700 font-medium">{lessonFormData.createdByName || lessonFormData.createdBy || getActiveAdminFullName(currentUser)}</span>
               </div>
 
               <div>

@@ -57,6 +57,16 @@
           "maxLength": 150,
           "description": "Cơ quan/Cán bộ biên soạn"
         },
+        "createdByUsername": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Tên tài khoản quản trị viên tạo"
+        },
+        "createdByName": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Họ và tên cán bộ quản trị viên tạo"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -142,6 +152,16 @@
           "type": "string",
           "maxLength": 150,
           "description": "Cán bộ biên soạn bài học"
+        },
+        "createdByUsername": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Tên tài khoản quản trị viên tạo"
+        },
+        "createdByName": {
+          "type": "string",
+          "maxLength": 150,
+          "description": "Họ và tên cán bộ quản trị viên tạo"
         },
         "createdAt": {
           "type": "string",

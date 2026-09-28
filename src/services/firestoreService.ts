@@ -563,6 +563,8 @@ export const firestoreService = {
       isFixed: data.isFixed !== undefined ? data.isFixed : isFixedCourse({ id, code, title: data.title }),
       categoryKey: data.categoryKey,
       createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
+      createdByUsername: data.createdByUsername || (data.createdBy?.startsWith('@') ? data.createdBy.slice(1) : undefined) || 'admin',
+      createdByName: data.createdByName || data.createdBy || 'Phòng Chính trị Vùng 4',
       createdAt: now,
       updatedAt: now
     };
@@ -762,6 +764,8 @@ export const firestoreService = {
       mediaVersion: 1,
       isDeleted: false,
       createdBy: data.createdBy || 'Ban Tuyên huấn Vùng 4',
+      createdByUsername: data.createdByUsername || (data.createdBy?.startsWith('@') ? data.createdBy.slice(1) : undefined) || 'admin',
+      createdByName: data.createdByName || data.createdBy || 'Ban Tuyên huấn Vùng 4',
       durationMinutes: data.durationMinutes || 45,
       rawPptUrl: data.rawPptUrl || '',
       rawPptStoragePath: data.rawPptStoragePath || '',
@@ -2617,6 +2621,9 @@ export const firestoreService = {
       priority: data.priority || 'NORMAL',
       targetUnitId: data.targetUnitId || 'ALL',
       sentBy: data.sentBy || 'Ban Tuyên huấn Vùng 4',
+      createdBy: data.createdBy || data.sentBy || 'Ban Tuyên huấn Vùng 4',
+      createdByUsername: data.createdByUsername || 'admin',
+      createdByName: data.createdByName || data.sentBy || 'Ban Tuyên huấn Vùng 4',
       createdAt: new Date().toISOString()
     };
     await setDoc(docRef, notif);
@@ -2714,6 +2721,9 @@ export const firestoreService = {
       backgroundColor: data.backgroundColor || 'linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%)',
       order: nextOrder,
       isActive: data.isActive ?? true,
+      createdBy: data.createdBy || 'Ban Tuyên huấn Vùng 4',
+      createdByUsername: data.createdByUsername || 'admin',
+      createdByName: data.createdByName || data.createdBy || 'Ban Tuyên huấn Vùng 4',
       createdAt: now,
       updatedAt: now
     };
@@ -3637,6 +3647,8 @@ export const firestoreService = {
       totalQuestions: preparedQuestions.length,
       questions: preparedQuestions,
       createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
+      createdByUsername: data.createdByUsername || (data.createdBy?.startsWith('@') ? data.createdBy.slice(1) : undefined) || 'admin',
+      createdByName: data.createdByName || data.createdBy || 'Phòng Chính trị Vùng 4',
       createdAt: now,
       updatedAt: now
     };
@@ -3825,6 +3837,8 @@ export const firestoreService = {
       startTime: data.startTime || now,
       endTime: data.endTime || '',
       createdBy: data.createdBy || 'Phòng Chính trị Vùng 4',
+      createdByUsername: data.createdByUsername || (data.createdBy?.startsWith('@') ? data.createdBy.slice(1) : undefined) || 'admin',
+      createdByName: data.createdByName || data.createdBy || 'Phòng Chính trị Vùng 4',
       createdAt: now,
       updatedAt: now
     };
@@ -4746,6 +4760,9 @@ export const firestoreService = {
       status: data.status || 'PUBLISHED',
       playCount: data.playCount || 0,
       order: data.order || 1,
+      createdBy: data.createdBy || data.broadcaster || 'Ban Tuyên huấn Vùng 4',
+      createdByUsername: data.createdByUsername || 'admin',
+      createdByName: data.createdByName || data.broadcaster || 'Ban Tuyên huấn Vùng 4',
       createdAt: now,
       updatedAt: now
     };
