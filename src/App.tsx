@@ -30,6 +30,7 @@ import { RadioBroadcastView } from './views/RadioBroadcastView';
 import { SystemAdminView } from './views/SystemAdminView';
 import { LoginView } from './views/LoginView';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { isGenericAgencyName } from './utils/creatorHelper';
 import { Radio, Bell, CheckCircle } from 'lucide-react';
 
 export function App() {
@@ -202,11 +203,15 @@ export function App() {
   // Course CRUD Handlers
   // -------------------------------------------------------------
   const handleCreateCourse = async (data: Partial<Course>) => {
+    const activeAdminName = adminUser?.fullName || adminUser?.name || 'Phạm Khắc Thành';
+    const finalCreatorName = data.createdByName && !isGenericAgencyName(data.createdByName)
+      ? data.createdByName
+      : (data.createdBy && !isGenericAgencyName(data.createdBy) ? data.createdBy : activeAdminName);
     const payload: Partial<Course> = {
       ...data,
       createdByUsername: data.createdByUsername || adminUser?.username || 'admin',
-      createdByName: data.createdByName || adminUser?.fullName || adminUser?.name || 'Phòng Chính trị Vùng 4',
-      createdBy: data.createdBy || adminUser?.username || 'Phòng Chính trị Vùng 4'
+      createdByName: finalCreatorName,
+      createdBy: finalCreatorName,
     };
     await api.createCourse(payload);
     await fetchAllData();
@@ -240,11 +245,15 @@ export function App() {
   // Lesson CRUD Handlers
   // -------------------------------------------------------------
   const handleCreateLesson = async (data: Partial<Lesson>) => {
+    const activeAdminName = adminUser?.fullName || adminUser?.name || 'Phạm Khắc Thành';
+    const finalCreatorName = data.createdByName && !isGenericAgencyName(data.createdByName)
+      ? data.createdByName
+      : (data.createdBy && !isGenericAgencyName(data.createdBy) ? data.createdBy : activeAdminName);
     const payload: Partial<Lesson> = {
       ...data,
       createdByUsername: data.createdByUsername || adminUser?.username || 'admin',
-      createdByName: data.createdByName || adminUser?.fullName || adminUser?.name || 'Ban Tuyên huấn Vùng 4',
-      createdBy: data.createdBy || adminUser?.username || 'Ban Tuyên huấn Vùng 4'
+      createdByName: finalCreatorName,
+      createdBy: finalCreatorName,
     };
     await api.createLesson(payload);
     await fetchAllData();

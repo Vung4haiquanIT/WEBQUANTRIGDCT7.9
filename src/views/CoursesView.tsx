@@ -35,7 +35,7 @@ import {
   FIXED_COURSES_DEFINITIONS 
 } from '../utils/fixedCourses';
 import { matchSearch } from '../utils/vietnamese';
-import { getCreatorUsername, getActiveAdminUsername, getActiveAdminFullName } from '../utils/creatorHelper';
+import { getCreatorDisplayName, getCreatorUsername, getActiveAdminUsername, getActiveAdminFullName } from '../utils/creatorHelper';
 
 interface CoursesViewProps {
   courses: Course[];
@@ -163,7 +163,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       thumbnail: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80',
       status: 'REVIEW',
       isFixed: false,
-      createdBy: activeUsername,
+      createdBy: activeFullName,
       createdByUsername: activeUsername,
       createdByName: activeFullName,
     });
@@ -173,15 +173,16 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const handleOpenEditCourse = (course: Course) => {
     setEditingCourse(course);
     const isFixed = course.isFixed !== undefined ? course.isFixed : isFixedCourse(course);
+    const resolvedCourseCreator = getCreatorDisplayName(course);
     setCourseFormData({
       title: course.title,
       year: course.year,
       thumbnail: course.thumbnail,
       status: course.status || 'REVIEW',
       isFixed,
-      createdBy: course.createdBy,
-      createdByUsername: course.createdByUsername || getCreatorUsername(course),
-      createdByName: course.createdByName || course.createdBy,
+      createdBy: resolvedCourseCreator,
+      createdByUsername: course.createdByUsername || getActiveAdminUsername(currentUser),
+      createdByName: resolvedCourseCreator,
     });
     setIsCourseModalOpen(true);
   };
@@ -189,10 +190,19 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
   const handleSubmitCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!courseFormData.title.trim()) return;
+    const activeFullName = getActiveAdminFullName(currentUser);
+    const activeUsername = getActiveAdminUsername(currentUser);
+    const finalCourseCreator = courseFormData.createdByName || activeFullName;
+    const payload: Partial<Course> = {
+      ...courseFormData,
+      createdBy: finalCourseCreator,
+      createdByName: finalCourseCreator,
+      createdByUsername: courseFormData.createdByUsername || activeUsername,
+    };
     if (editingCourse) {
-      await onUpdateCourse(editingCourse.id, courseFormData);
+      await onUpdateCourse(editingCourse.id, payload);
     } else {
-      await onCreateCourse(courseFormData);
+      await onCreateCourse(payload);
     }
     setIsCourseModalOpen(false);
   };
@@ -260,7 +270,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       showContents: true,
       showVideos: true,
       showAudios: true,
-      createdBy: activeUsername,
+      createdBy: activeFullName,
       createdByUsername: activeUsername,
       createdByName: activeFullName,
       year: courseYear,
@@ -273,6 +283,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     setSelectedCourseForNewLesson(lesson.courseId);
     const parentCourse = courses.find((c) => c.id === lesson.courseId);
     const lessonYear = lesson.year || lesson.courseYear || parentCourse?.year || ((parentCourse?.title || '').match(/20\d{2}/) ? parseInt((parentCourse?.title || '').match(/20\d{2}/)![0], 10) : new Date().getFullYear());
+    const resolvedLessonCreator = getCreatorDisplayName(lesson, parentCourse);
     setLessonFormData({
       courseId: lesson.courseId,
       title: lesson.title,
@@ -282,9 +293,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
       showContents: lesson.moduleConfig?.showContents !== false,
       showVideos: lesson.moduleConfig?.showVideos !== false,
       showAudios: lesson.moduleConfig?.showAudios !== false,
-      createdBy: lesson.createdBy || 'Ban Tuyên huấn Vùng 4',
-      createdByUsername: lesson.createdByUsername || getCreatorUsername(lesson),
-      createdByName: lesson.createdByName || lesson.createdBy,
+      createdBy: resolvedLessonCreator,
+      createdByUsername: lesson.createdByUsername || getActiveAdminUsername(currentUser),
+      createdByName: resolvedLessonCreator,
       year: lessonYear,
     });
     setIsLessonModalOpen(true);
@@ -295,6 +306,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
     if (!lessonFormData.title.trim() || !lessonFormData.courseId) return;
     const parentCourse = courses.find((c) => c.id === lessonFormData.courseId);
     const resolvedYear = lessonFormData.year || parentCourse?.year || new Date().getFullYear();
+    const activeFullName = getActiveAdminFullName(currentUser);
+    const activeUsername = getActiveAdminUsername(currentUser);
+    const finalLessonCreator = lessonFormData.createdByName || activeFullName;
 
     const payload: Partial<Lesson> = {
       courseId: lessonFormData.courseId,
@@ -310,7 +324,9 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
         showVideos: lessonFormData.showVideos,
         showAudios: lessonFormData.showAudios,
       },
-      createdBy: lessonFormData.createdBy,
+      createdBy: finalLessonCreator,
+      createdByName: finalLessonCreator,
+      createdByUsername: lessonFormData.createdByUsername || activeUsername,
     };
     if (editingLesson) {
       await onUpdateLesson(editingLesson.id, payload);
@@ -667,7 +683,7 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
                                         : 'Chờ thẩm định'}
                                     </span>
                                     <span className="text-[11px] text-slate-400 font-normal">
-                                      tạo bởi: <span className="text-slate-500 font-medium">{getCreatorUsername(lesson)}</span>
+                                      tạo bởi: <span className="text-slate-500 font-medium">{getCreatorDisplayName(lesson, course)}</span>
                                     </span>
                                   </div>
 

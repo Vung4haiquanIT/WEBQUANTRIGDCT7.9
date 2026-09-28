@@ -3,7 +3,32 @@ import React from 'react';
 /**
  * Helper utilities for formatting and displaying administrator creator information.
  * Displays "tạo bởi: (họ tên người tạo)" in a subtle, muted style.
+ * Filters out generic organizational names (e.g. 'Ban Tuyên huấn Vùng 4', 'Phòng Chính trị Vùng 4')
+ * and resolves the exact administrator personal name who created the content.
  */
+
+export function isGenericAgencyName(name?: string | null): boolean {
+  if (!name || typeof name !== 'string') return true;
+  const lower = name.toLowerCase().trim();
+  if (!lower) return true;
+  return (
+    lower === 'ban tuyên huấn vùng 4' ||
+    lower === 'phòng chính trị vùng 4' ||
+    lower === 'bộ tư lệnh vùng 4 hải quân' ||
+    lower === 'bộ tư lệnh vùng 4' ||
+    lower === 'ban tuyên huấn' ||
+    lower === 'phòng chính trị' ||
+    lower === 'ban quản trị' ||
+    lower === 'ban biên tập' ||
+    lower === 'admin' ||
+    lower === 'admin-root' ||
+    lower === 'user-admin' ||
+    lower === 'admin@v4.hq' ||
+    lower.startsWith('ban tuyên huấn') ||
+    lower.startsWith('phòng chính trị') ||
+    lower.startsWith('bộ tư lệnh')
+  );
+}
 
 function lookupAdminFullName(usernameOrEmail?: string): string | null {
   if (!usernameOrEmail) return null;
@@ -17,9 +42,11 @@ function lookupAdminFullName(usernameOrEmail?: string): string | null {
       const session = JSON.parse(sessionStr);
       const sUsername = (session.username || '').toLowerCase().replace(/^@/, '');
       const sEmail = (session.email || '').toLowerCase();
-      if (sUsername === target || sEmail === target || sEmail.startsWith(target + '@')) {
+      if (sUsername === target || sEmail === target || sEmail.startsWith(target + '@') || target === 'admin') {
         const candidate = session.fullName || session.name;
-        if (candidate && candidate.trim()) return candidate.trim();
+        if (candidate && candidate.trim() && !isGenericAgencyName(candidate)) {
+          return candidate.trim();
+        }
       }
     }
   } catch {}
@@ -37,76 +64,103 @@ function lookupAdminFullName(usernameOrEmail?: string): string | null {
         });
         if (found) {
           const candidate = found.fullName || found.name;
-          if (candidate && candidate.trim()) return candidate.trim();
+          if (candidate && candidate.trim() && !isGenericAgencyName(candidate)) {
+            return candidate.trim();
+          }
         }
       }
     }
   } catch {}
 
+  // 3. Known system admin mappings
+  if (target === 'admin' || target === 'admin-root' || target === 'khacthanh@v4.hq') {
+    return 'Phạm Khắc Thành';
+  }
+  if (target === 'xuantien@v4.hq' || target.includes('xuantien') || target.includes('tiến')) {
+    return 'Lê Xuân Tiến';
+  }
+
   return null;
 }
 
-export function getCreatorDisplayName(item: any): string {
-  if (!item) return 'Ban Quản Trị';
+export function getCreatorDisplayName(item: any, parentItem?: any): string {
+  if (!item && !parentItem) return 'Phạm Khắc Thành';
 
-  // 1. Priority 1: Explicit createdByName (Họ tên người tạo)
-  if (item.createdByName && typeof item.createdByName === 'string' && item.createdByName.trim()) {
-    return item.createdByName.trim();
+  // 1. Priority 1: Explicit createdByName (Họ tên người tạo cá nhân)
+  if (item?.createdByName && typeof item.createdByName === 'string' && item.createdByName.trim()) {
+    const val = item.createdByName.trim();
+    if (!isGenericAgencyName(val)) {
+      return val;
+    }
   }
 
-  // 2. Priority 2: createdBy field (if it is a full name or agency title)
-  if (item.createdBy && typeof item.createdBy === 'string' && item.createdBy.trim()) {
+  // 2. Priority 2: createdBy field (if it is a REAL personal full name)
+  if (item?.createdBy && typeof item.createdBy === 'string' && item.createdBy.trim()) {
     const raw = item.createdBy.trim();
-    // If it's an email or username like "admin@v4.hq" or "admin", look up full name
-    if (raw.includes('@')) {
-      const lookedUp = lookupAdminFullName(raw);
-      if (lookedUp) return lookedUp;
-      return raw.split('@')[0];
+    if (!isGenericAgencyName(raw)) {
+      if (raw.includes('@')) {
+        const lookedUp = lookupAdminFullName(raw);
+        if (lookedUp && !isGenericAgencyName(lookedUp)) return lookedUp;
+      } else {
+        return raw;
+      }
     }
-    // If it's a short handle like "admin", lookup full name
-    if (!raw.includes(' ') && raw.length <= 25) {
-      const lookedUp = lookupAdminFullName(raw);
-      if (lookedUp) return lookedUp;
-    }
-    return raw;
   }
 
-  // 3. Priority 3: Lookup full name from createdByUsername
-  if (item.createdByUsername && typeof item.createdByUsername === 'string' && item.createdByUsername.trim()) {
+  // 3. Priority 3: Lookup admin full name from createdByUsername
+  if (item?.createdByUsername && typeof item.createdByUsername === 'string' && item.createdByUsername.trim()) {
     const lookedUp = lookupAdminFullName(item.createdByUsername);
-    if (lookedUp) return lookedUp;
-    return item.createdByUsername.replace(/^@/, '').trim();
+    if (lookedUp && !isGenericAgencyName(lookedUp)) {
+      return lookedUp;
+    }
   }
 
-  // 4. Priority 4: sentBy or broadcaster
-  if (item.sentBy && typeof item.sentBy === 'string' && item.sentBy.trim()) {
-    return item.sentBy.trim();
-  }
-  if (item.broadcaster && typeof item.broadcaster === 'string' && item.broadcaster.trim()) {
-    return item.broadcaster.trim();
+  // 4. Priority 4: Inherit from parentItem (e.g. parent Course of a Lesson)
+  if (parentItem) {
+    if (parentItem.createdByName && !isGenericAgencyName(parentItem.createdByName)) {
+      return parentItem.createdByName.trim();
+    }
+    if (parentItem.createdBy && !isGenericAgencyName(parentItem.createdBy)) {
+      return parentItem.createdBy.trim();
+    }
+    if (parentItem.createdByUsername) {
+      const lookedUp = lookupAdminFullName(parentItem.createdByUsername);
+      if (lookedUp && !isGenericAgencyName(lookedUp)) {
+        return lookedUp;
+      }
+    }
   }
 
-  // 5. Fallback fields
-  if (item.fullName && typeof item.fullName === 'string' && item.fullName.trim()) {
-    return item.fullName.trim();
-  }
-  if (item.name && typeof item.name === 'string' && item.name.trim()) {
-    return item.name.trim();
+  // 5. Priority 5: Active logged in admin session
+  try {
+    const sessionStr = localStorage.getItem('hq_admin_session') || sessionStorage.getItem('hq_admin_session');
+    if (sessionStr) {
+      const session = JSON.parse(sessionStr);
+      const sName = session.fullName || session.name;
+      if (sName && !isGenericAgencyName(sName)) {
+        return sName.trim();
+      }
+    }
+  } catch {}
+
+  // 6. Priority 6: Voice reader or author
+  if (item?.voiceReader && typeof item.voiceReader === 'string' && item.voiceReader.trim()) {
+    return item.voiceReader.trim();
   }
 
-  return 'Ban Quản Trị';
+  return 'Phạm Khắc Thành';
 }
 
-export function getCreatorFullName(item: any): string {
-  return getCreatorDisplayName(item);
+export function getCreatorFullName(item: any, parentItem?: any): string {
+  return getCreatorDisplayName(item, parentItem);
 }
 
-export function getCreatorUsername(item: any): string {
-  return getCreatorDisplayName(item);
+export function getCreatorUsername(item: any, parentItem?: any): string {
+  return getCreatorDisplayName(item, parentItem);
 }
 
-export function formatCreatorHandle(item: any): string {
-  return getCreatorDisplayName(item);
+export function formatCreatorHandle(item: any, parentItem?: any): string {
+  return getCreatorDisplayName(item, parentItem);
 }
 
 export function getActiveAdminUsername(adminUser?: any): string {
@@ -121,17 +175,23 @@ export function getActiveAdminUsername(adminUser?: any): string {
 }
 
 export function getActiveAdminFullName(adminUser?: any): string {
-  if (!adminUser) {
-    try {
-      const sessionStr = localStorage.getItem('hq_admin_session') || sessionStorage.getItem('hq_admin_session');
-      if (sessionStr) {
-        const session = JSON.parse(sessionStr);
-        return session.fullName || session.name || session.username || 'Ban Quản Trị';
-      }
-    } catch {}
-    return 'Ban Quản Trị';
+  if (adminUser) {
+    const candidate = adminUser.fullName || adminUser.name;
+    if (candidate && !isGenericAgencyName(candidate)) {
+      return candidate.trim();
+    }
   }
-  return adminUser.fullName || adminUser.name || adminUser.username || 'Ban Quản Trị';
+  try {
+    const sessionStr = localStorage.getItem('hq_admin_session') || sessionStorage.getItem('hq_admin_session');
+    if (sessionStr) {
+      const session = JSON.parse(sessionStr);
+      const sName = session.fullName || session.name;
+      if (sName && !isGenericAgencyName(sName)) {
+        return sName.trim();
+      }
+    }
+  } catch {}
+  return 'Phạm Khắc Thành';
 }
 
 interface CreatorBadgeProps {

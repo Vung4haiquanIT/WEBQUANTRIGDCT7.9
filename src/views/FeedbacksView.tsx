@@ -298,7 +298,8 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
     setActiveFeedbackForResponse(fb);
     setResponseStatus(fb.status === 'PENDING' ? 'RESOLVED' : fb.status);
     setResponseText(''); // Không điền phản hồi cũ để tránh sửa đè, luôn để trống để nhập phản hồi mới thêm
-    setRespondedByText(currentUser?.name || 'Ban Tuyên Huấn - Vùng 4 Hải Quân');
+    const activeAdminName = currentUser?.fullName || currentUser?.name || currentUser?.username || 'Phạm Khắc Thành';
+    setRespondedByText(activeAdminName);
   };
 
   // Submit Response
@@ -313,11 +314,12 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
 
     setIsSubmittingResponse(true);
     try {
+      const finalResponder = currentUser?.fullName || currentUser?.name || respondedByText || 'Phạm Khắc Thành';
       await api.updateFeedbackStatus(
         activeFeedbackForResponse.id,
         responseStatus,
         responseText.trim(),
-        respondedByText.trim()
+        finalResponder
       );
       const prevCount = getFeedbackResponses(activeFeedbackForResponse).length;
       alert(prevCount > 0 
@@ -1079,16 +1081,23 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
                 />
               </div>
 
-              {/* Responded By Input */}
+              {/* Responded By Input (Cố định theo tài khoản Admin, không được sửa) */}
               <div>
-                <label className="block text-slate-700 font-bold mb-1">Danh Nghĩa Phản Hồi (Tên/Chức vụ người trả lời)</label>
-                <input
-                  type="text"
-                  placeholder="Ví dụ: Thượng tá Trần Văn Nam - Trưởng ban Tuyên huấn Vùng 4"
-                  value={respondedByText}
-                  onChange={(e) => setRespondedByText(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-slate-900 focus:outline-none focus:border-blue-500 focus:bg-white font-medium"
-                />
+                <label className="block text-slate-700 font-bold mb-1 flex items-center justify-between">
+                  <span>Danh Nghĩa Phản Hồi (Tên/Chức vụ người trả lời)</span>
+                  <span className="text-[11px] font-normal text-slate-400 italic">
+                    (Cố định theo tài khoản Admin đăng nhập, không được sửa)
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={respondedByText}
+                    className="w-full bg-slate-100 border border-slate-200 rounded-xl p-2.5 text-slate-700 font-bold cursor-not-allowed select-none focus:outline-none"
+                  />
+                </div>
               </div>
 
               {/* Modal Buttons */}

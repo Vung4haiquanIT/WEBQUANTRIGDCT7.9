@@ -89,7 +89,7 @@ import { parseDocumentFile, generateQuestionsForContent, ParsedDocumentResult } 
 import { QuillEditor } from '../components/QuillEditor';
 import { UniversalVideoPlayer } from '../components/UniversalVideoPlayer';
 import { parseVideoUrl, getEffectiveVideoThumbnail } from '../utils/videoHelper';
-import { getCreatorUsername } from '../utils/creatorHelper';
+import { getCreatorDisplayName, getCreatorUsername } from '../utils/creatorHelper';
 
 // Uncle Ho Navy / Military Teaching Templates for Quick-Fill
 const UNCLE_HO_PRESETS = [
@@ -392,7 +392,46 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
       setSourceDocs(docRes);
       setSections(secRes);
       setItems(itemsRes);
-      setQuestions(qRes);
+
+      // Clean any legacy hardcoded dummy question strings
+      const cleanedQuestions = (qRes || []).map((q: LessonQuestion, idx: number) => {
+        let questionText = q.question || '';
+        if (
+          questionText === 'Câu hỏi đánh giá nhận thức số 1?' ||
+          questionText === 'Câu hỏi đánh giá nhận thức số 1' ||
+          questionText === 'Câu hỏi nhận thức số 1'
+        ) {
+          questionText = 'Câu hỏi 1';
+        } else if (/^Câu hỏi đánh giá nhận thức số \d+\??$/.test(questionText)) {
+          const num = questionText.match(/\d+/)?.[0] || String(idx + 1);
+          questionText = `Câu hỏi ${num}`;
+        }
+
+        let options = q.options;
+        if (
+          Array.isArray(options) &&
+          options.length === 4 &&
+          options[0] === 'Phương án A' &&
+          options[1] === 'Phương án B' &&
+          options[2] === 'Phương án C' &&
+          options[3] === 'Phương án D'
+        ) {
+          options = ['', '', '', ''];
+        }
+
+        let explanation = q.explanation;
+        if (explanation === 'Giải thích ý nghĩa tư tưởng và bài học thực tiễn.') {
+          explanation = '';
+        }
+
+        return {
+          ...q,
+          question: questionText,
+          options,
+          explanation
+        };
+      });
+      setQuestions(cleanedQuestions);
 
       if (secRes.length > 0) {
         setActiveSectionId(secRes[0].id);
@@ -822,25 +861,24 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
   };
 
   const handleAddQuestionToItem = (itemId: string) => {
-    const itemQs = questions.filter(q => q.itemId === itemId);
     const nextOrder = questions.length + 1;
     const tempQ: LessonQuestion = {
       id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       lessonId: currentLesson.id,
       itemId: itemId || items[0]?.id || '',
       sectionId: sections[0]?.id || '',
-      question: `Câu hỏi đánh giá nhận thức số ${nextOrder}?`,
+      question: '',
       type: 'single_choice',
-      options: ['Phương án A', 'Phương án B', 'Phương án C', 'Phương án D'],
+      options: ['', '', '', ''],
       correctAnswer: 0,
-      explanation: 'Giải thích ý nghĩa tư tưởng và bài học thực tiễn.',
+      explanation: '',
       order: nextOrder,
       points: 10,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
     setQuestions(prev => [...prev, tempQ]);
-    showToast(`Đã thêm câu hỏi số ${nextOrder}. Hãy chỉnh sửa và bấm "Lưu toàn bộ câu hỏi" để đồng bộ lên Firebase.`);
+    showToast(`Đã thêm câu hỏi ${nextOrder}. Hãy nhập nội dung và bấm "Lưu toàn bộ câu hỏi".`);
   };
 
   const handleQuestionTypeChange = (qId: string, newType: QuestionType) => {
@@ -858,14 +896,14 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
     } else if (newType === 'multiple_choice') {
       updates.options = (currentQ.options && currentQ.options.length >= 2)
         ? currentQ.options
-        : ['Phương án A', 'Phương án B', 'Phương án C', 'Phương án D'];
+        : ['', '', '', ''];
       updates.correctAnswer = Array.isArray(currentQ.correctAnswer)
         ? currentQ.correctAnswer
         : [typeof currentQ.correctAnswer === 'number' ? currentQ.correctAnswer : 0];
     } else {
       updates.options = (currentQ.options && currentQ.options.length >= 2)
         ? currentQ.options
-        : ['Phương án A', 'Phương án B', 'Phương án C', 'Phương án D'];
+        : ['', '', '', ''];
       updates.correctAnswer = typeof currentQ.correctAnswer === 'number'
         ? currentQ.correctAnswer
         : (Array.isArray(currentQ.correctAnswer) && currentQ.correctAnswer.length > 0 ? currentQ.correctAnswer[0] : 0);
@@ -905,7 +943,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
 
         if (q.id.startsWith('temp_')) {
           const created = await api.createQuestion(currentLesson.id, targetItemId, {
-            question: q.question || `Câu hỏi đánh giá số ${normalizedOrder}`,
+            question: q.question || `Câu hỏi ${normalizedOrder}`,
             type: q.type || 'single_choice',
             options: q.options || [],
             correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
@@ -1760,7 +1798,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                 v{currentLesson.version}
               </span>
               <span className="text-[11px] text-slate-400 font-normal">
-                tạo bởi: <span className="text-slate-600 font-medium">{getCreatorUsername(currentLesson)}</span>
+                tạo bởi: <span className="text-slate-600 font-medium">{getCreatorDisplayName(currentLesson)}</span>
               </span>
               <span className="text-[10px] text-slate-500 font-mono">
                 Cập nhật: {new Date(currentLesson.updatedAt).toLocaleTimeString('vi-VN')}
@@ -2521,7 +2559,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                               {q.order || qIdx + 1}
                             </span>
                             <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
-                              Câu hỏi kiểm tra {q.order || qIdx + 1}
+                              Câu hỏi {q.order || qIdx + 1}
                             </span>
                             <select
                               value={q.type}
@@ -2566,8 +2604,8 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                             type="text"
                             value={q.question}
                             onChange={(e) => handleUpdateQuestion(q.id, { question: e.target.value })}
-                            className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium focus:outline-none focus:border-blue-500"
-                            placeholder="Nhập nội dung câu hỏi..."
+                            className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                            placeholder={`Nhập nội dung câu hỏi ${q.order || qIdx + 1}...`}
                           />
                         </div>
 
@@ -2587,7 +2625,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                                         newOpts = newOpts.slice(0, 3);
                                       } else if (newOpts.length < 3) {
                                         while (newOpts.length < 3) {
-                                          newOpts.push(`Phương án ${String.fromCharCode(65 + newOpts.length)}`);
+                                          newOpts.push('');
                                         }
                                       }
                                       handleUpdateQuestion(q.id, { options: newOpts });
@@ -2601,7 +2639,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                                       const currentOpts = q.options || [];
                                       let newOpts = [...currentOpts];
                                       while (newOpts.length < 4) {
-                                        newOpts.push(`Phương án ${String.fromCharCode(65 + newOpts.length)}`);
+                                        newOpts.push('');
                                       }
                                       handleUpdateQuestion(q.id, { options: newOpts });
                                     }}
@@ -2650,8 +2688,8 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                                         newOpts[oIdx] = e.target.value;
                                         handleUpdateQuestion(q.id, { options: newOpts });
                                       }}
-                                      className="flex-1 bg-transparent text-xs text-slate-800 focus:outline-none"
-                                      placeholder={`Nội dung phương án ${optionLabel}`}
+                                      className="flex-1 bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none"
+                                      placeholder={`Nội dung phương án ${optionLabel}...`}
                                     />
                                     {isCorrect && (
                                       <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/70 px-1.5 py-0.5 rounded">
@@ -2672,8 +2710,8 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                             type="text"
                             value={q.explanation || ''}
                             onChange={(e) => handleUpdateQuestion(q.id, { explanation: e.target.value })}
-                            className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
-                            placeholder="Nhập giải thích chi tiết cho học viên sau khi trả lời..."
+                            className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                            placeholder="Giải thích ý nghĩa tư tưởng và bài học thực tiễn (nếu có)..."
                           />
                         </div>
                       </div>
