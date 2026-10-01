@@ -772,8 +772,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
       {/* Modal: Create / Edit Course */}
       {isCourseModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsCourseModalOpen(false);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 cursor-default">
             <div className="p-4 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-wider">
                 {editingCourse ? 'Chỉnh sửa Chuyên đề' : 'Thêm Chuyên đề GDCT mới'}
@@ -905,8 +910,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
       {/* Modal: Create / Edit Lesson */}
       {isLessonModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsLessonModalOpen(false);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 cursor-default">
             <div className="p-4 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-wider">
                 {editingLesson ? 'Chỉnh sửa thông tin bài học' : 'Thêm Bài học mới'}
@@ -1041,8 +1051,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
       {/* Modal: Confirm Delete Course */}
       {courseToDelete && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 p-6 space-y-4">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeletingItem) setCourseToDelete(null);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 p-6 space-y-4 cursor-default">
             <div className="flex items-center space-x-3 text-rose-600">
               <div className="p-3 bg-rose-50 rounded-2xl">
                 <Trash2 className="w-6 h-6" />
@@ -1080,8 +1095,13 @@ export const CoursesView: React.FC<CoursesViewProps> = ({
 
       {/* Modal: Confirm Delete Lesson */}
       {lessonToDelete && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 p-6 space-y-4">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeletingItem) setLessonToDelete(null);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 p-6 space-y-4 cursor-default">
             <div className="flex items-center space-x-3 text-rose-600">
               <div className="p-3 bg-rose-50 rounded-2xl">
                 <Trash2 className="w-6 h-6" />

@@ -935,8 +935,13 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
       {/* MODAL: RESPONSE TO FEEDBACK */}
       {/* ========================================================= */}
       {activeFeedbackForResponse && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 animate-in zoom-in-95">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveFeedbackForResponse(null);
+          }}
+        >
+          <div className="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 animate-in zoom-in-95 cursor-default">
             <div className="p-4 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-wider flex items-center space-x-2">
                 <MessageCircle className="w-4 h-4 text-amber-400" />
@@ -1131,8 +1136,13 @@ export const FeedbacksView: React.FC<FeedbacksViewProps> = ({ currentUser, units
       {/* MODAL: CREATE TEST FEEDBACK (GIẢ LẬP GỬI PHẢN ÁNH) */}
       {/* ========================================================= */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 animate-in zoom-in-95">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsCreateModalOpen(false);
+          }}
+        >
+          <div className="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 animate-in zoom-in-95 cursor-default">
             <div className="p-4 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-wider flex items-center space-x-2">
                 <Plus className="w-4 h-4 text-amber-400" />

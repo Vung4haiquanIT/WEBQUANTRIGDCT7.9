@@ -131,9 +131,8 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       setSelectedBankForDetail(updatedBank);
       setEditingQuestion(null);
       await loadAllData();
-      alert('Đã cập nhật chỉnh sửa câu hỏi và tự động đồng bộ tức thì lên Cloud App cho tất cả tài khoản di động!');
     } catch (err: any) {
-      alert(`Lỗi cập nhật câu hỏi: ${err.message}`);
+      console.error(`Lỗi cập nhật câu hỏi: ${err.message}`);
     } finally {
       setIsSavingQuestion(false);
     }
@@ -151,9 +150,8 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
         totalQuestions: updatedQuestions.length
       });
       await loadAllData();
-      alert('Đã xóa câu hỏi và cập nhật dữ liệu bộ đề lên Cloud App di động!');
     } catch (err: any) {
-      alert(`Lỗi xóa câu hỏi: ${err.message}`);
+      console.error(`Lỗi xóa câu hỏi: ${err.message}`);
     }
   };
 
@@ -648,7 +646,6 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
         parsedExcelResult.questions
       );
 
-      alert(`Đã lưu thành công Bộ đề "${created.title}" với ${parsedExcelResult.questions.length} câu hỏi! (Người tạo: @${adminUsername})`);
       setIsNewBankModalOpen(false);
       setExcelFile(null);
       setParsedExcelResult(null);
@@ -757,17 +754,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
     const selectedBank = banks.find(b => b.id === sessionFormData.bankId);
 
     try {
-      let bankQuestions: ExamQuestion[] = [];
-      const fullBank = await api.getExamBank(sessionFormData.bankId);
-      if (fullBank?.questions && fullBank.questions.length > 0) {
-        bankQuestions = fullBank.questions;
-      } else if (selectedBank?.questions && selectedBank.questions.length > 0) {
-        bankQuestions = selectedBank.questions;
-      }
-
-      const requestedCount = Number(sessionFormData.totalQuestions) || 20;
-      const pool = bankQuestions.length > 0 ? bankQuestions : (editingSession?.questions || []);
-      const selectedQuestions = api.pickRandomQuestions(pool, requestedCount);
+      const requestedCount = Number(sessionFormData.totalQuestions) || 10;
       
       const startDatePart = formatForDateInput(sessionFormData.startTime) || formatForDateInput(new Date());
       const endDatePart = formatForDateInput(sessionFormData.endTime) || formatForDateInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
@@ -791,9 +778,9 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           bankTitle: selectedBank?.title || editingSession.bankTitle || 'Bộ đề kiểm tra',
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
-          totalQuestions: selectedQuestions.length,
+          totalQuestions: requestedCount,
           maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 3,
-          questions: selectedQuestions,
+          questions: [], // Không lưu đề thi vào exam_sessions
           targetUnit: 'ALL',
           startTime: startIso,
           endTime: endIso,
@@ -801,7 +788,6 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
         });
 
         setSessions(prev => prev.map(s => s.id === editingSession.id ? updated : s));
-        alert(`Đã lưu thay đổi đợt kiểm tra "${updated.title}"! Trạng thái: ${computedAuto.label}. Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       } else {
         const adminUsername = getActiveAdminUsername(currentUser);
         const adminFullName = getActiveAdminFullName(currentUser);
@@ -813,9 +799,9 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
           bankTitle: selectedBank?.title || 'Bộ đề kiểm tra',
           durationMinutes: Number(sessionFormData.durationMinutes) || 20,
           passScore: Number(sessionFormData.passScore) || 5.0,
-          totalQuestions: selectedQuestions.length,
+          totalQuestions: requestedCount,
           maxAttempts: Number(sessionFormData.maxAttempts) !== undefined ? Number(sessionFormData.maxAttempts) : 3,
-          questions: selectedQuestions,
+          questions: [], // Không lưu đề thi vào exam_sessions
           targetUnit: 'ALL',
           startTime: startIso,
           endTime: endIso,
@@ -826,7 +812,6 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
         });
 
         setSessions(prev => [created, ...prev.filter(s => s.id !== created.id)]);
-        alert(`Đã khởi tạo đợt kiểm tra mới "${created.title}"! (Người tạo: @${adminUsername}) Trạng thái: ${computedAuto.label}. Đã chọn ngẫu nhiên ${selectedQuestions.length} câu hỏi từ bộ đề (tổng ${pool.length} câu) và đẩy lên Cloud App di động.`);
       }
 
       setIsNewSessionModalOpen(false);
@@ -954,19 +939,17 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
   // Start Mobile App Test Simulator
   const handleStartTestSimulator = async (session: ExamSession) => {
-    let questionsForTest: ExamQuestion[] = session.questions || [];
-    if (!questionsForTest || questionsForTest.length === 0) {
-      const bank = await api.getExamBank(session.bankId);
-      questionsForTest = bank?.questions || [];
-    }
+    // Luôn lấy ngẫu nhiên câu hỏi từ exam_banks thông qua bankId
+    const bank = await api.getExamBank(session.bankId);
+    const questionsForTest = bank?.questions || [];
 
     if (!questionsForTest || questionsForTest.length === 0) {
-      alert('Bộ đề của đợt kiểm tra này hiện chưa có câu hỏi! Vui lòng bấm nút "Đẩy Bộ Đề Lên App" để đồng bộ câu hỏi từ ngân hàng đề.');
+      alert('Bộ đề của đợt kiểm tra này hiện chưa có câu hỏi trong Ngân hàng đề! Vui lòng kiểm tra lại Ngân hàng đề thi.');
       return;
     }
 
-    const targetCount = session.totalQuestions || questionsForTest.length;
-    const finalQuestions = questionsForTest.slice(0, targetCount);
+    const targetCount = session.totalQuestions || 10;
+    const finalQuestions = api.pickRandomQuestions(questionsForTest, targetCount);
 
     setActiveSimulatorSession(session);
     setSimulatorQuestions(finalQuestions);
@@ -2050,8 +2033,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: EXCEL IMPORT QUESTION BANK */}
       {/* ========================================================= */}
       {isNewBankModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsNewBankModalOpen(false);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col cursor-default">
             <div className="p-4 bg-emerald-900 text-white border-b border-emerald-800 flex items-center justify-between shrink-0">
               <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
                 <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
@@ -2205,8 +2193,16 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: CREATE / EDIT EXAM SESSION */}
       {/* ========================================================= */}
       {isNewSessionModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsNewSessionModalOpen(false);
+              setEditingSession(null);
+            }
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 cursor-default">
             <div className="p-4 bg-slate-900 text-white border-b border-slate-800 flex items-center justify-between">
               <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
                 <Edit3 className="w-4 h-4 text-amber-400" />
@@ -2557,8 +2553,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: VIEW BANK QUESTIONS DETAIL */}
       {/* ========================================================= */}
       {selectedBankForDetail && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[85vh] flex flex-col">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedBankForDetail(null);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[85vh] flex flex-col cursor-default">
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
                 <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
@@ -2655,8 +2656,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: CHỈNH SỬA CÂU HỎI TRONG BỘ ĐỀ */}
       {/* ========================================================= */}
       {editingQuestion && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setEditingQuestion(null);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col cursor-default">
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <h3 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
                 <Edit3 className="w-4 h-4 text-amber-400" />
@@ -2756,8 +2762,17 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: MOBILE APP TEST SIMULATOR */}
       {/* ========================================================= */}
       {activeSimulatorSession && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-3">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh] text-white">
+        <div 
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-3 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setActiveSimulatorSession(null);
+              setSimulatorQuestions([]);
+              setTestResultSummary(null);
+            }
+          }}
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh] text-white cursor-default">
             {/* Header */}
             <div className="p-4 bg-slate-800 border-b border-slate-700 flex items-center justify-between shrink-0">
               <div>
@@ -2875,8 +2890,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: SUBMISSION CANDIDATE DETAIL */}
       {/* ========================================================= */}
       {selectedSubmissionForDetail && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[70] flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col">
+        <div 
+          className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[70] flex items-center justify-center p-3 sm:p-4 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedSubmissionForDetail(null);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col cursor-default">
             {/* Modal Header */}
             <div className="p-4 sm:p-5 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
               <div className="flex items-center space-x-3">
@@ -3252,8 +3272,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       {/* MODAL: ACCOUNT EXAM SUBMISSIONS DETAIL */}
       {/* ========================================================= */}
       {selectedAccountForExamDetail && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedAccountForExamDetail(null);
+          }}
+        >
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh] cursor-default">
             {/* Header */}
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center space-x-3">
@@ -3379,8 +3404,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
       {/* Modal Xác Nhận Xóa Đợt Kiểm Tra */}
       {sessionToDelete && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSessionToDelete(null);
+          }}
+        >
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4 cursor-default">
             <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
               <Trash2 className="w-7 h-7" />
             </div>
@@ -3414,8 +3444,13 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
 
       {/* Modal Xác Nhận Xóa Bộ Đề Thi */}
       {bankToDelete && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-150 cursor-pointer"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setBankToDelete(null);
+          }}
+        >
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4 cursor-default">
             <div className="w-14 h-14 bg-rose-100 text-rose-600 rounded-2xl flex items-center justify-center mx-auto">
               <Trash2 className="w-7 h-7" />
             </div>

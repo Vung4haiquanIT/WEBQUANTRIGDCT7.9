@@ -179,6 +179,18 @@ export function isOfficialExamRecord(raw: any, docId?: string): boolean {
     return true;
   }
 
+  // Accept if it has valid score or question counts from candidate tests
+  if (
+    raw.score !== undefined || 
+    raw.diem !== undefined || 
+    raw.correctCount !== undefined || 
+    raw.soCauDung !== undefined ||
+    raw.totalQuestions !== undefined ||
+    raw.tongSoCau !== undefined
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -3680,9 +3692,10 @@ export const firestoreService = {
       const now = new Date().toISOString();
       const batch = writeBatch(db);
       qSnap.docs.forEach(d => {
+        // Chỉ cập nhật thời điểm đồng bộ và số lượng câu hỏi trong ngân hàng,
+        // không ghi đè số câu hỏi cấu hình (totalQuestions) của đợt thi!
         batch.update(d.ref, {
-          questions,
-          totalQuestions: questions.length,
+          bankQuestionCount: questions.length,
           pushedToAppAt: now,
           updatedAt: now
         });
@@ -3800,25 +3813,10 @@ export const firestoreService = {
   createExamSession: async (data: Partial<ExamSession>): Promise<ExamSession> => {
     const id = data.id || `session-${Date.now()}`;
     const now = new Date().toISOString();
-    let questions: ExamQuestion[] = data.questions || [];
+    const reqTotal = Number(data.totalQuestions) || 10;
 
-    if (questions.length === 0 && data.bankId) {
-      try {
-        const bankSnap = await getDoc(doc(db, 'exam_banks', data.bankId));
-        if (bankSnap.exists() && bankSnap.data()?.questions?.length > 0) {
-          questions = bankSnap.data().questions;
-        } else {
-          const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', data.bankId)));
-          questions = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
-        }
-      } catch (err) {
-        console.warn('[createExamSession] Could not auto-fetch bank questions:', err);
-      }
-    }
-
-    const reqTotal = Number(data.totalQuestions) || questions.length || 20;
-    const selectedQuestions = firestoreService.pickRandomQuestions(questions, reqTotal);
-
+    // Không tạo đề thi vào exam_sessions mà chỉ lưu bankId và số lượng câu hỏi cần thi (totalQuestions).
+    // Khi thí sinh kiểm tra, App sẽ tự động bốc ngẫu nhiên câu hỏi từ exam_banks thông qua bankId.
     const session: ExamSession = {
       id,
       title: data.title || 'Đợt kiểm tra mới',
@@ -3828,9 +3826,9 @@ export const firestoreService = {
       bankTitle: data.bankTitle || '',
       durationMinutes: Number(data.durationMinutes) || 20,
       passScore: Number(data.passScore) || 5.0,
-      totalQuestions: selectedQuestions.length,
+      totalQuestions: reqTotal,
       maxAttempts: data.maxAttempts !== undefined ? Number(data.maxAttempts) : 3,
-      questions: selectedQuestions,
+      questions: [], // Tuyệt đối không lưu danh sách câu hỏi đề thi vào exam_sessions
       targetUnit: data.targetUnit || 'ALL',
       status: data.status || 'ACTIVE',
       pushedToAppAt: now,
@@ -3843,7 +3841,12 @@ export const firestoreService = {
       updatedAt: now
     };
 
-    const cleanSession = sanitizeFirestoreData(session);
+    const cleanSession = sanitizeFirestoreData({
+      ...session,
+      questionCount: reqTotal,
+      numberOfQuestions: reqTotal,
+      soCauHoi: reqTotal
+    });
     await setDoc(doc(db, 'exam_sessions', id), cleanSession);
     await setDoc(doc(db, 'system_meta', 'init_flags'), { examSessionsSeeded: true }, { merge: true });
     return session;
@@ -3855,44 +3858,24 @@ export const firestoreService = {
     const existingData = existing.exists() ? (existing.data() as ExamSession) : ({} as ExamSession);
     const now = new Date().toISOString();
 
-    let poolQuestions: ExamQuestion[] = data.questions || [];
-    const targetBankId = data.bankId || existingData.bankId;
+    const reqTotal = Number(data.totalQuestions) || Number(existingData.totalQuestions) || 10;
 
-    if (targetBankId) {
-      try {
-        const bankSnap = await getDoc(doc(db, 'exam_banks', targetBankId));
-        if (bankSnap.exists() && bankSnap.data()?.questions?.length > 0) {
-          poolQuestions = bankSnap.data().questions;
-        } else {
-          const qSnap = await getDocs(query(collection(db, 'exam_questions'), where('bankId', '==', targetBankId)));
-          const fetched = qSnap.docs.map(d => d.data() as ExamQuestion).sort((a, b) => a.stt - b.stt);
-          if (fetched.length > 0) poolQuestions = fetched;
-        }
-      } catch (err) {
-        console.warn('[updateExamSession] Could not auto-fetch bank questions:', err);
-      }
-    }
-
-    if (poolQuestions.length === 0 && existingData.questions) {
-      poolQuestions = existingData.questions;
-    }
-
-    const reqTotal = Number(data.totalQuestions) || Number(existingData.totalQuestions) || poolQuestions.length || 20;
-    const selectedQuestions = firestoreService.pickRandomQuestions(poolQuestions, reqTotal);
-
-    const mergedPayload: ExamSession = {
+    const mergedPayload = {
       ...existingData,
       ...data,
       id,
-      questions: selectedQuestions,
-      totalQuestions: selectedQuestions.length,
+      totalQuestions: reqTotal,
+      questionCount: reqTotal,
+      numberOfQuestions: reqTotal,
+      soCauHoi: reqTotal,
+      questions: [], // Tuyệt đối không lưu danh sách câu hỏi đề thi vào exam_sessions
       pushedToAppAt: now,
       updatedAt: now
     };
 
     const cleanPayload = sanitizeFirestoreData(mergedPayload);
     await setDoc(docRef, cleanPayload, { merge: true });
-    return mergedPayload;
+    return cleanPayload as ExamSession;
   },
 
   syncSessionBankQuestions: async (sessionId: string): Promise<{ session: ExamSession; syncedQuestionCount: number }> => {
@@ -3908,9 +3891,13 @@ export const firestoreService = {
     }
 
     const now = new Date().toISOString();
+    const reqTotal = Number(sessionData.totalQuestions) || 10;
     const updatePayload = {
-      questions,
-      totalQuestions: questions.length > 0 ? questions.length : sessionData.totalQuestions,
+      totalQuestions: reqTotal,
+      questionCount: reqTotal,
+      numberOfQuestions: reqTotal,
+      soCauHoi: reqTotal,
+      bankQuestionCount: questions.length,
       status: 'ACTIVE' as const,
       pushedToAppAt: now,
       updatedAt: now
@@ -3958,6 +3945,16 @@ export const firestoreService = {
         subSnap.docs.forEach(d => subBatch.delete(d.ref));
         await subBatch.commit();
       }
+
+      // 4. Cascade delete from exam_results if any
+      try {
+        const resSnap = await getDocs(query(collection(db, 'exam_results'), where('sessionId', '==', id)));
+        if (!resSnap.empty) {
+          const resBatch = writeBatch(db);
+          resSnap.docs.forEach(d => resBatch.delete(d.ref));
+          await resBatch.commit();
+        }
+      } catch {}
 
       return { success: true };
     } catch (err) {
@@ -4069,6 +4066,28 @@ export const firestoreService = {
         console.warn('[getExamSubmissions from exam_submissions error]:', err);
       }
 
+      // 3. Fetch from 'exam_results' (Mobile / Client app exam results collection)
+      try {
+        const colRef = collection(db, 'exam_results');
+        let q;
+        if (sessionId && sessionId !== 'ALL') {
+          q = query(colRef, where('sessionId', '==', sessionId));
+        } else {
+          q = query(colRef);
+        }
+        const resultsSnap = await getDocs(q);
+        resultsSnap.docs.forEach(d => {
+          if (!resultMap.has(d.id)) {
+            const sub = mapExamDocToSubmission(d, userMap);
+            if (sub) {
+              resultMap.set(sub.id, sub);
+            }
+          }
+        });
+      } catch (err) {
+        console.warn('[getExamSubmissions from exam_results error]:', err);
+      }
+
       const subs = Array.from(resultMap.values());
       return subs.sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
     } catch (err) {
@@ -4125,6 +4144,7 @@ export const firestoreService = {
 
     const cleanSubmission = sanitizeFirestoreData(fullSubmission);
     await setDoc(doc(db, 'exam_submissions', id), cleanSubmission);
+    await setDoc(doc(db, 'exam_results', id), cleanSubmission).catch(() => {});
 
     // Also persist into ket_qua_thi marked as official exam
     try {
@@ -4164,6 +4184,7 @@ export const firestoreService = {
   listenExamSubmissions: (sessionId: string | undefined, callback: (subs: ExamSubmission[]) => void) => {
     let ketQuaDocs: ExamSubmission[] = [];
     let examSubDocs: ExamSubmission[] = [];
+    let examResultDocs: ExamSubmission[] = [];
     let userMap = new Map<string, User>();
 
     const refreshUsers = async () => {
@@ -4185,6 +4206,9 @@ export const firestoreService = {
       const combinedMap = new Map<string, ExamSubmission>();
       ketQuaDocs.forEach(s => combinedMap.set(s.id, s));
       examSubDocs.forEach(s => {
+        if (!combinedMap.has(s.id)) combinedMap.set(s.id, s);
+      });
+      examResultDocs.forEach(s => {
         if (!combinedMap.has(s.id)) combinedMap.set(s.id, s);
       });
 
@@ -4222,9 +4246,22 @@ export const firestoreService = {
       console.warn('[listenExamSubmissions on exam_submissions warning]:', err);
     });
 
+    // Listen to 'exam_results'
+    const unsubExamResults = onSnapshot(collection(db, 'exam_results'), (snapshot) => {
+      examResultDocs = [];
+      snapshot.docs.forEach(d => {
+        const sub = mapExamDocToSubmission(d, userMap);
+        if (sub) examResultDocs.push(sub);
+      });
+      emit();
+    }, (err) => {
+      console.warn('[listenExamSubmissions on exam_results warning]:', err);
+    });
+
     return () => {
       unsubKetQua();
       unsubExamSubs();
+      unsubExamResults();
     };
   },
 

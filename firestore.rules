@@ -244,6 +244,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Exam Results Collection (Kết quả kiểm tra từ mobile app)
+    match /exam_results/{resultId} {
+      allow read, write: if true;
+    }
+
     // Cuộc thi trực tuyến & Kết quả thi Collection
     match /ket_qua_thi/{resultId} {
       allow read, write: if true;
