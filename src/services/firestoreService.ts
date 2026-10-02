@@ -281,6 +281,70 @@ export function mapExamDocToSubmission(
   };
 }
 
+// Deduplicates submissions across multiple sync collections (ket_qua_thi, exam_submissions, exam_results)
+export function deduplicateSubmissions(list: ExamSubmission[]): ExamSubmission[] {
+  if (!list || list.length === 0) return [];
+
+  const uniqueList: ExamSubmission[] = [];
+  const sorted = [...list].sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
+
+  for (const s of sorted) {
+    const sTime = getSafeTimestamp(s.submittedAt);
+    const sUser = (s.userId || s.userName || '').trim().toLowerCase();
+    const sSess = (s.sessionId || s.sessionTitle || '').trim().toLowerCase();
+    const sScore = Number(s.score ?? 0).toFixed(1);
+    const sCorrect = Number(s.correctCount ?? 0);
+
+    const dupIndex = uniqueList.findIndex(existing => {
+      // 1. Exact document ID
+      if (s.id && existing.id && s.id === existing.id) return true;
+
+      // 2. Candidate match
+      const eUser = (existing.userId || existing.userName || '').trim().toLowerCase();
+      const userMatches = (sUser && eUser && sUser === eUser) || 
+        Boolean(s.userName && existing.userName && s.userName.trim().toLowerCase() === existing.userName.trim().toLowerCase());
+      if (!userMatches) return false;
+
+      // 3. Exam match
+      const eSess = (existing.sessionId || existing.sessionTitle || '').trim().toLowerCase();
+      const sessMatches = (sSess && eSess && sSess === eSess) ||
+        Boolean(s.sessionTitle && existing.sessionTitle && s.sessionTitle.trim().toLowerCase() === existing.sessionTitle.trim().toLowerCase());
+      if (!sessMatches) return false;
+
+      // 4. Score & correct count match
+      const eScore = Number(existing.score ?? 0).toFixed(1);
+      const eCorrect = Number(existing.correctCount ?? 0);
+      if (sScore !== eScore || sCorrect !== eCorrect) {
+        return false;
+      }
+
+      // 5. Time difference within 15 seconds (same submission written to multiple collections)
+      const eTime = getSafeTimestamp(existing.submittedAt);
+      const diffSecs = Math.abs(sTime - eTime) / 1000;
+      return diffSecs <= 15;
+    });
+
+    if (dupIndex === -1) {
+      uniqueList.push(s);
+    } else {
+      const existing = uniqueList[dupIndex];
+      const hasAnswers = (s.answers && s.answers.length > 0) && (!existing.answers || existing.answers.length === 0);
+      if (hasAnswers) {
+        uniqueList[dupIndex] = {
+          ...existing,
+          ...s,
+          answers: s.answers,
+          userPosition: s.userPosition || existing.userPosition,
+          userRank: s.userRank || existing.userRank,
+          unitName: s.unitName || existing.unitName
+        };
+      }
+    }
+  }
+
+  return uniqueList;
+}
+
 // Normalizes raw feedback documents from either 'feedbacks' or 'user_feedbacks'
 // Safely extracts all attached images (Base64 or Cloud URLs) and metadata
 export function normalizeFeedbackDoc(id: string, data: any): UserFeedback {
@@ -4088,7 +4152,8 @@ export const firestoreService = {
         console.warn('[getExamSubmissions from exam_results error]:', err);
       }
 
-      const subs = Array.from(resultMap.values());
+      const rawSubs = Array.from(resultMap.values());
+      const subs = deduplicateSubmissions(rawSubs);
       return subs.sort((a, b) => getSafeTimestamp(b.submittedAt) - getSafeTimestamp(a.submittedAt));
     } catch (err) {
       console.warn('[getExamSubmissions error]:', err);
@@ -4203,16 +4268,9 @@ export const firestoreService = {
     };
 
     const emit = () => {
-      const combinedMap = new Map<string, ExamSubmission>();
-      ketQuaDocs.forEach(s => combinedMap.set(s.id, s));
-      examSubDocs.forEach(s => {
-        if (!combinedMap.has(s.id)) combinedMap.set(s.id, s);
-      });
-      examResultDocs.forEach(s => {
-        if (!combinedMap.has(s.id)) combinedMap.set(s.id, s);
-      });
+      const rawList = [...ketQuaDocs, ...examSubDocs, ...examResultDocs];
+      let list = deduplicateSubmissions(rawList);
 
-      let list = Array.from(combinedMap.values());
       if (sessionId && sessionId !== 'ALL') {
         list = list.filter(s => s.sessionId === sessionId || s.sessionTitle === sessionId);
       }
@@ -4263,6 +4321,11 @@ export const firestoreService = {
       unsubExamSubs();
       unsubExamResults();
     };
+  },
+
+  // Helper to deduplicate exam submissions across collections
+  deduplicateSubmissions: (list: ExamSubmission[]): ExamSubmission[] => {
+    return deduplicateSubmissions(list);
   },
 
   // Helper to normalize feedback document data from any client version (especially attached images)

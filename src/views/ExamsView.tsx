@@ -574,15 +574,16 @@ export const ExamsView: React.FC<ExamsViewProps> = ({ currentUser, units = [], u
       return true;
     });
 
-    // Sort by submitted time descending (latest attempt first)
-    userSubmissions.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+    // Lọc bỏ trùng lặp lượt thi (loại trừ các bản ghi bị ghi đúp qua nhiều collection)
+    const uniqueUserSubmissions = api.deduplicateSubmissions(userSubmissions);
+    uniqueUserSubmissions.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
 
     const matchedUser = users.find(u => 
       (sub.userId && u.id === sub.userId) || 
       (u.fullName && sub.userName && u.fullName.trim().toLowerCase() === sub.userName.trim().toLowerCase()) ||
       (u.name && sub.userName && u.name.trim().toLowerCase() === sub.userName.trim().toLowerCase())
     );
-    const list = userSubmissions.length > 0 ? userSubmissions : [sub];
+    const list = uniqueUserSubmissions.length > 0 ? uniqueUserSubmissions : [sub];
     const highest = Math.max(...list.map(s => s.score || 0));
 
     setSelectedAccountForExamDetail({

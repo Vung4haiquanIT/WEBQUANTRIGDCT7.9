@@ -1410,6 +1410,10 @@ export const api = {
     return firestoreService.listenExamSubmissions(sessionId, callback);
   },
 
+  deduplicateSubmissions: (list: ExamSubmission[]): ExamSubmission[] => {
+    return firestoreService.deduplicateSubmissions(list);
+  },
+
   // -------------------------------------------------------------
   // USER FEEDBACKS & REPORTS (PHẢN ÁNH TỪ CÁC TÀI KHOẢN VỀ WEB QUẢN TRỊ)
   // -------------------------------------------------------------
