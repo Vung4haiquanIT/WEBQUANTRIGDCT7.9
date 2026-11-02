@@ -1441,7 +1441,47 @@ export const firestoreService = {
       );
     }
     const snap = await getDocs(q);
-    const questions = snap.docs.map(d => d.data() as LessonQuestion);
+    const questions = snap.docs.map(d => {
+      const data = d.data() as LessonQuestion;
+      let questionText = (data.question || '').trim();
+      if (
+        /^câu hỏi (đánh giá )?nhận thức( số)? \d+\??$/i.test(questionText) ||
+        /^câu hỏi \d+\??$/i.test(questionText) ||
+        questionText.toLowerCase().includes('đánh giá nhận thức') ||
+        questionText.toLowerCase().includes('câu hỏi nhận thức')
+      ) {
+        questionText = '';
+      }
+
+      let options = data.options;
+      if (Array.isArray(options)) {
+        options = options.map((opt, i) => {
+          const trimmed = (opt || '').trim().toLowerCase();
+          const letter = String.fromCharCode(97 + i);
+          if (
+            trimmed === `phương án ${letter}` ||
+            trimmed === `phương án ${letter}.` ||
+            trimmed === `đáp án ${letter}` ||
+            trimmed === letter
+          ) {
+            return '';
+          }
+          return opt;
+        });
+      }
+
+      let explanation = (data.explanation || '').trim();
+      if (explanation.toLowerCase().includes('giải thích ý nghĩa tư tưởng')) {
+        explanation = '';
+      }
+
+      return {
+        ...data,
+        question: questionText,
+        options,
+        explanation
+      };
+    });
     return questions.sort((a, b) => (a.order || 0) - (b.order || 0));
   },
 

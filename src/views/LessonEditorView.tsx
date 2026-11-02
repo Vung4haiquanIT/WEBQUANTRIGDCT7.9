@@ -395,32 +395,46 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
 
       // Clean any legacy hardcoded dummy question strings
       const cleanedQuestions = (qRes || []).map((q: LessonQuestion, idx: number) => {
-        let questionText = q.question || '';
-        if (
-          questionText === 'Câu hỏi đánh giá nhận thức số 1?' ||
-          questionText === 'Câu hỏi đánh giá nhận thức số 1' ||
-          questionText === 'Câu hỏi nhận thức số 1'
-        ) {
-          questionText = 'Câu hỏi 1';
-        } else if (/^Câu hỏi đánh giá nhận thức số \d+\??$/.test(questionText)) {
-          const num = questionText.match(/\d+/)?.[0] || String(idx + 1);
-          questionText = `Câu hỏi ${num}`;
+        let questionText = (q.question || '').trim();
+        // Xóa phần nhập sẵn câu hỏi mẫu, để rỗng để hiển thị gợi ý mờ (placeholder)
+        const isDummyQuestion = 
+          !questionText ||
+          /^câu hỏi (đánh giá )?nhận thức( số)? \d+\??$/i.test(questionText) ||
+          /^câu hỏi \d+\??$/i.test(questionText) ||
+          questionText.toLowerCase().includes('đánh giá nhận thức') ||
+          questionText.toLowerCase().includes('câu hỏi nhận thức');
+
+        if (isDummyQuestion) {
+          questionText = '';
         }
 
         let options = q.options;
-        if (
-          Array.isArray(options) &&
-          options.length === 4 &&
-          options[0] === 'Phương án A' &&
-          options[1] === 'Phương án B' &&
-          options[2] === 'Phương án C' &&
-          options[3] === 'Phương án D'
-        ) {
+        if (Array.isArray(options)) {
+          options = options.map((opt, i) => {
+            const trimmed = (opt || '').trim().toLowerCase();
+            const letter = String.fromCharCode(97 + i);
+            if (
+              trimmed === `phương án ${letter}` ||
+              trimmed === `phương án ${letter}.` ||
+              trimmed === `đáp án ${letter}` ||
+              trimmed === `đáp án ${letter}.` ||
+              trimmed === letter ||
+              trimmed === `${letter}.`
+            ) {
+              return '';
+            }
+            return opt;
+          });
+        } else {
           options = ['', '', '', ''];
         }
 
-        let explanation = q.explanation;
-        if (explanation === 'Giải thích ý nghĩa tư tưởng và bài học thực tiễn.') {
+        let explanation = (q.explanation || '').trim();
+        if (
+          !explanation ||
+          explanation.toLowerCase().includes('giải thích ý nghĩa tư tưởng') ||
+          explanation.toLowerCase().includes('hướng dẫn trả lời')
+        ) {
           explanation = '';
         }
 
@@ -943,11 +957,11 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
 
         if (q.id.startsWith('temp_')) {
           const created = await api.createQuestion(currentLesson.id, targetItemId, {
-            question: q.question || `Câu hỏi ${normalizedOrder}`,
+            question: (q.question || '').trim(),
             type: q.type || 'single_choice',
             options: q.options || [],
             correctAnswer: q.correctAnswer !== undefined ? q.correctAnswer : 0,
-            explanation: q.explanation || '',
+            explanation: (q.explanation || '').trim(),
             order: normalizedOrder,
             points: q.points || 10,
             sectionId: targetSectionId
@@ -2602,10 +2616,10 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                           <label className="block text-[11px] font-bold text-slate-700 mb-1">Nội dung câu hỏi:</label>
                           <input
                             type="text"
-                            value={q.question}
+                            value={q.question || ''}
                             onChange={(e) => handleUpdateQuestion(q.id, { question: e.target.value })}
                             className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 font-medium placeholder-slate-400 focus:outline-none focus:border-blue-500"
-                            placeholder={`Nhập nội dung câu hỏi ${q.order || qIdx + 1}...`}
+                            placeholder={`Câu hỏi ${q.order || qIdx + 1}`}
                           />
                         </div>
 
@@ -2682,14 +2696,14 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                                     />
                                     <input
                                       type="text"
-                                      value={opt}
+                                      value={opt || ''}
                                       onChange={(e) => {
                                         const newOpts = [...(q.options || [])];
                                         newOpts[oIdx] = e.target.value;
                                         handleUpdateQuestion(q.id, { options: newOpts });
                                       }}
                                       className="flex-1 bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none"
-                                      placeholder={`Nội dung phương án ${optionLabel}...`}
+                                      placeholder={`Phương án ${optionLabel}`}
                                     />
                                     {isCorrect && (
                                       <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/70 px-1.5 py-0.5 rounded">
@@ -2711,7 +2725,7 @@ export const LessonEditorView: React.FC<LessonEditorViewProps> = ({
                             value={q.explanation || ''}
                             onChange={(e) => handleUpdateQuestion(q.id, { explanation: e.target.value })}
                             className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
-                            placeholder="Giải thích ý nghĩa tư tưởng và bài học thực tiễn (nếu có)..."
+                            placeholder="Giải thích ý nghĩa tư tưởng và bài học thực tiễn..."
                           />
                         </div>
                       </div>
